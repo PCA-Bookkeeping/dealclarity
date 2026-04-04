@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useRef } from "react";
+import { supabase } from "./supabase";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend,
   LineChart, Line, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, AreaChart, Area,
@@ -55,20 +56,20 @@ const T = {
     savePortfolio: "Save to Portfolio", saved: "Saved!", exportPdf: "Export PDF Report",
     pdfHint: "Report opened! Click 'Save as PDF' or use Ctrl+P / Cmd+P.",
     // Pro box
-    goPro: "Go Pro", proPrice: "from $9/mo",
+    goPro: "Go Pro", proPrice: "from $29/mo",
     proDesc: "PDF reports for lenders, unlimited what-if scenarios, CPA-ready annual summaries, deal sync across devices.",
     startTrial: "Start 7-Day Free Trial",
     // Pro modal
     proTitle: "DealClarity Pro", proSub: "The full toolkit for serious operators",
-    trialNote: "Cancel anytime.", annualSave: "$79/year (save 27%)",
-    lifetimeOffer: "$199 lifetime (one-time)", secureCheckout: "Secure checkout via Stripe. Cancel anytime.",
+    trialNote: "Cancel anytime.", annualSave: "$249/year (save 29%)",
+    lifetimeOffer: "$499 lifetime (one-time)", secureCheckout: "Secure checkout via Stripe. Cancel anytime.",
     getEarlyAccess: "Get Early Access", notifyLaunch: "We'll notify you when Pro launches.",
     enterEmail: "Enter your email to get notified", onTheList: "You're on the list!",
     notifyEmail: "We'll notify", whenLaunches: "when Pro launches.",
     backToAnalyzer: "Back to Analyzer",
-    trialMonthly: "Monthly - $9/mo",
-    trialAnnual: "Annual - $79/yr (save 27%)",
-    trialLifetime: "Lifetime - $199 (one-time)",
+    trialMonthly: "Monthly - $29/mo",
+    trialAnnual: "Annual - $249/yr (save 27%)",
+    trialLifetime: "Lifetime - $499 (one-time)",
     haveCode: "Have a Pro code?",
     // Pro features
     f1: "8 deal type analyzers", f2: "Save unlimited deals", f3: "Side-by-side comparison",
@@ -1365,9 +1366,9 @@ ${expRows ? `<h2 style="font-size:15px;font-weight:700;color:${B.pri};margin-bot
 // STRIPE CONFIG (Replace with your Stripe checkout links)
 // ═══════════════════════════════════════════════════════════════
 const STRIPE = {
-  monthly: "https://buy.stripe.com/4gMaEX37b8qd0iY7KL6Zy0g",
-  annual: "https://buy.stripe.com/14AcN57nr8qd9Ty7KL6Zy0h",
-  lifetime: "https://buy.stripe.com/9B68wP9vzeOBfdSe996Zy0i",
+  monthly: "https://buy.stripe.com/3cIaEX237bCp1n2e996Zy0k",
+  annual: "https://buy.stripe.com/00w00j37b5e1d5K6GH6Zy0l",
+  lifetime: "https://buy.stripe.com/cNiaEX7nr35TaXC0ij6Zy0m",
 };
 const hasStripe = STRIPE.monthly || STRIPE.annual || STRIPE.lifetime;
 
@@ -1407,6 +1408,13 @@ export default function DealClarity() {
   const [emailDone, setEmailDone] = useState(false);
   const [pdfMsg, setPdfMsg] = useState("");
   const [isPro, setIsPro] = useState(() => { try { return localStorage.getItem("dc_pro") === "true"; } catch { return false; } });
+  const [user, setUser] = useState(null);
+const [showAuth, setShowAuth] = useState(false);
+const [authEmail, setAuthEmail] = useState("");
+const [authPassword, setAuthPassword] = useState("");
+const [authMode, setAuthMode] = useState("signin");
+const [authError, setAuthError] = useState("");
+const [authLoading, setAuthLoading] = useState(false);
   const [proCode, setProCode] = useState("");
   const [proMsg, setProMsg] = useState("");
 
@@ -1415,17 +1423,40 @@ export default function DealClarity() {
     try { localStorage.setItem("dc_portfolio", JSON.stringify(p)); } catch {}
   }, []);
 
-  const activatePro = (code) => {
-    if (code === PRO_CODE) {
-      setIsPro(true);
-      try { localStorage.setItem("dc_pro", "true"); } catch {}
-      setProMsg("Pro activated! Full access unlocked.");
-      setTimeout(() => { setProMsg(""); setShowPro(false); }, 2000);
+  const activatePro = async (code) => {
+  if (code === PRO_CODE) {
+    setIsPro(true);
+    setProMsg("Pro activated! Full access unlocked.");
+    setTimeout(() => { setProMsg(""); setShowPro(false); }, 2000);
+  } else {
+    setProMsg("Invalid code. Please check and try again.");
+    setTimeout(() => setProMsg(""), 3000);
+  }
+};
+
+const handleAuth = async () => {
+  setAuthError(""); setAuthLoading(true);
+  try {
+    if (authMode === "signup") {
+      const { error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
+      if (error) throw error;
+      setAuthError("Check your email to confirm your account.");
     } else {
-      setProMsg("Invalid code. Please check and try again.");
-      setTimeout(() => setProMsg(""), 3000);
+      const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
+      if (error) throw error;
+      const { data: profile } = await supabase.from("profiles").select("is_pro, pro_type").eq("id", data.user.id).single();
+      setUser(data.user);
+      setIsPro(profile?.is_pro || false);
+      setShowAuth(false);
     }
-  };
+  } catch (e) { setAuthError(e.message); }
+  setAuthLoading(false);
+};
+
+const handleSignOut = async () => {
+  await supabase.auth.signOut();
+  setUser(null); setIsPro(false); setSavedDeals([]);
+};
 
   const cd = dealData[dealType];
   const uf = useCallback((k, v) => setDealData(p => {
@@ -1472,6 +1503,19 @@ export default function DealClarity() {
 };
 
   // PDF export
+  const handleCheckout = async (plan) => {
+  if (!user) { setShowAuth(true); return; }
+  try {
+    const res = await fetch("/api/create-checkout", {
+      method: "POST",
+      body: JSON.stringify({ plan, email: user.email }),
+    });
+    const { url } = await res.json();
+    window.location.href = url;
+  } catch (e) {
+    alert("Checkout error. Please try again.");
+  }
+};
   const exportPDF = (deal) => {
   if (!isPro) { setShowPro(true); return; }
 const editDeal = (deal) => {
@@ -1737,9 +1781,9 @@ const editDeal = (deal) => {
               {/* Stripe Purchase Buttons */}
               {hasStripe && (
                 <div className="space-y-2">
-                  {STRIPE.monthly && <a href={STRIPE.monthly} target="_blank" rel="noopener noreferrer" className="block w-full text-center py-3 rounded-xl font-bold text-sm transition-all hover:opacity-90" style={{ background: B.gold, color: B.pri }}>{t.trialMonthly || "Start Free Trial - $9/mo"}</a>}
-                  {STRIPE.annual && <a href={STRIPE.annual} target="_blank" rel="noopener noreferrer" className="block w-full text-center py-3 rounded-xl font-bold text-sm transition-all hover:opacity-90 border-2" style={{ borderColor: B.gold, color: B.gold }}>{t.trialAnnual || "Annual Plan - $79/yr (save 27%)"}</a>}
-                  {STRIPE.lifetime && <a href={STRIPE.lifetime} target="_blank" rel="noopener noreferrer" className="block w-full text-center py-3 rounded-xl font-bold text-sm transition-all hover:opacity-90 border-2" style={{ borderColor: B.accL, color: B.accL }}>{t.trialLifetime || "Lifetime Access - $199"}</a>}
+                  {STRIPE.monthly && <a href={STRIPE.monthly} target="_blank" rel="noopener noreferrer" className="block w-full text-center py-3 rounded-xl font-bold text-sm transition-all hover:opacity-90" style={{ background: B.gold, color: B.pri }}>{t.trialMonthly || "Start Free Trial - $29/mo"}</a>}
+                  {STRIPE.annual && <a href={STRIPE.annual} target="_blank" rel="noopener noreferrer" className="block w-full text-center py-3 rounded-xl font-bold text-sm transition-all hover:opacity-90 border-2" style={{ borderColor: B.gold, color: B.gold }}>{t.trialAnnual || "Annual Plan - $249/yr (save 27%)"}</a>}
+                  {STRIPE.lifetime && <a href={STRIPE.lifetime} target="_blank" rel="noopener noreferrer" className="block w-full text-center py-3 rounded-xl font-bold text-sm transition-all hover:opacity-90 border-2" style={{ borderColor: B.accL, color: B.accL }}>{t.trialLifetime || "Lifetime Access - $499"}</a>}
                   <p className="text-xs text-center" style={{ color: B.mut }}>{t.secureCheckout || "Secure checkout via Stripe. Cancel anytime."}</p>
                 </div>
               )}
