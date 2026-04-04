@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import BudgetPlanner from "./BudgetPlanner";
 
 // ═══════════════════════════════════════════════════════════════
 // CONSTANTS & BRAND
@@ -316,6 +317,7 @@ const getPages = (t) => [
   { id: "compare", label: t.compare, icon: GitCompare },
   { id: "splits", label: t.splits, icon: Users },
   { id: "sensitivity", label: t.whatIf, icon: Target },
+  { id: "budget", label: "Budget", icon: PiggyBank },
 ];
 const getGrades = (t) => [
   { min: 90, grade: "A+", color: "#16A34A", bg: "#DCFCE7", label: t.gradeAp },
@@ -1762,9 +1764,10 @@ const editDeal = (deal) => {
         {page === "compare" && <Compare deals={portfolio} t={t} localDealTypes={localDealTypes} />}
         {page === "splits" && <Splits t={t} />}
         {page === "sensitivity" && (isPro ? <Sensitivity deals={portfolio} t={t} getGradeL={getGradeL} localDealTypes={localDealTypes} /> : <ProGate feature="Sensitivity Analysis" onUnlock={() => setShowPro(false)} setShowPro={setShowPro} t={t} />)}
+        {page === "budget" && <BudgetPlanner isPro={isPro} setShowPro={setShowPro} />}
         <footer className="text-center py-6 mt-8 border-t" style={{ borderColor: B.brd }}><p className="text-xs" style={{ color: B.mut }}>{t.footer}</p></footer>
       </main>
-      
+
       {showAuth && (
   <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.5)" }} onClick={() => setShowAuth(false)}>
     <div className="rounded-2xl max-w-sm w-full overflow-hidden" style={{ background: B.card }} onClick={e => e.stopPropagation()}>
