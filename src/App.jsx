@@ -1736,12 +1736,12 @@ const editDeal = (deal) => {
   style={{ background: saved ? B.grn : editingDeal ? B.gold : B.pri, color: editingDeal ? B.pri : "#fff" }}
 >
   {saved ? (
-    <><Check size={16} /> {t.saved}</>
-  ) : editingDeal ? (
-    <><Check size={16} /> Update Deal</>
-  ) : (
-    editingDeal ? <><Check size={16} /> Update Deal</> : <><Plus size={16} /> {t.savePortfolio}</>
-  )}
+  <><Check size={16} /> {t.saved}</>
+) : editingDeal ? (
+  <><Check size={16} /> Update Deal</>
+) : (
+  <><Plus size={16} /> {t.savePortfolio}</>
+)}
 </button>
 {editingDeal && (
   <button
@@ -1764,7 +1764,45 @@ const editDeal = (deal) => {
         {page === "sensitivity" && (isPro ? <Sensitivity deals={portfolio} t={t} getGradeL={getGradeL} localDealTypes={localDealTypes} /> : <ProGate feature="Sensitivity Analysis" onUnlock={() => setShowPro(false)} setShowPro={setShowPro} t={t} />)}
         <footer className="text-center py-6 mt-8 border-t" style={{ borderColor: B.brd }}><p className="text-xs" style={{ color: B.mut }}>{t.footer}</p></footer>
       </main>
-
+      
+      {showAuth && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.5)" }} onClick={() => setShowAuth(false)}>
+    <div className="rounded-2xl max-w-sm w-full overflow-hidden" style={{ background: B.card }} onClick={e => e.stopPropagation()}>
+      <div className="p-6" style={{ background: B.pri }}>
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-bold text-white">{authMode === "signup" ? "Create Account" : "Sign In"}</h2>
+          <button onClick={() => setShowAuth(false)} className="text-white hover:opacity-70">✕</button>
+        </div>
+      </div>
+      <div className="p-6 space-y-4">
+        <div>
+          <label className="text-xs font-semibold block mb-1" style={{ color: B.mut }}>Email</label>
+          <input type="email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} placeholder="you@email.com" className="w-full px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2" style={{ borderColor: B.brd }} />
+        </div>
+        <div>
+          <label className="text-xs font-semibold block mb-1" style={{ color: B.mut }}>Password</label>
+          <input type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} placeholder="••••••••" className="w-full px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2" style={{ borderColor: B.brd }} />
+        </div>
+        {authError && <p className="text-xs text-center font-medium" style={{ color: authError.includes("Check") ? B.grn : B.red }}>{authError}</p>}
+        <button onClick={handleAuth} disabled={authLoading} className="w-full py-3 rounded-xl font-bold text-sm hover:opacity-90 disabled:opacity-50" style={{ background: B.pri, color: "#fff" }}>
+          {authLoading ? "Please wait..." : authMode === "signup" ? "Create Account" : "Sign In"}
+        </button>
+        <p className="text-xs text-center" style={{ color: B.mut }}>
+          {authMode === "signup" ? "Already have an account? " : "No account yet? "}
+          <button onClick={() => { setAuthMode(authMode === "signup" ? "signin" : "signup"); setAuthError(""); }} className="font-semibold underline" style={{ color: B.blue }}>
+            {authMode === "signup" ? "Sign in" : "Create one"}
+          </button>
+        </p>
+        {user && (
+          <div className="pt-2 border-t text-center" style={{ borderColor: B.brd }}>
+            <p className="text-xs mb-2" style={{ color: B.mut }}>Signed in as {user.email}</p>
+            <button onClick={handleSignOut} className="text-xs underline" style={{ color: B.red }}>Sign out</button>
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+)}
       {showPro && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.5)" }} onClick={() => setShowPro(false)}><div className="rounded-2xl max-w-lg w-full overflow-hidden max-h-[90vh] overflow-y-auto" style={{ background: B.card }} onClick={e => e.stopPropagation()}>
         <div className="p-6" style={{ background: B.pri }}><div className="flex items-center justify-between"><div><h2 className="text-lg font-bold text-white">{t.proTitle || "Unlock DealClarity Pro"}</h2><p className="text-xs" style={{ color: "#A3B8D4" }}>{t.proSub || "Unlock all premium features"}</p></div><button onClick={() => setShowPro(false)} className="text-white text-xl hover:opacity-70">x</button></div></div>
         <div className="p-6">
@@ -1779,14 +1817,18 @@ const editDeal = (deal) => {
                 ))}
               </div>
               {/* Stripe Purchase Buttons */}
-              {hasStripe && (
-                <div className="space-y-2">
-                  {STRIPE.monthly && <a href={STRIPE.monthly} target="_blank" rel="noopener noreferrer" className="block w-full text-center py-3 rounded-xl font-bold text-sm transition-all hover:opacity-90" style={{ background: B.gold, color: B.pri }}>{t.trialMonthly || "Start Free Trial - $29/mo"}</a>}
-                  {STRIPE.annual && <a href={STRIPE.annual} target="_blank" rel="noopener noreferrer" className="block w-full text-center py-3 rounded-xl font-bold text-sm transition-all hover:opacity-90 border-2" style={{ borderColor: B.gold, color: B.gold }}>{t.trialAnnual || "Annual Plan - $249/yr (save 27%)"}</a>}
-                  {STRIPE.lifetime && <a href={STRIPE.lifetime} target="_blank" rel="noopener noreferrer" className="block w-full text-center py-3 rounded-xl font-bold text-sm transition-all hover:opacity-90 border-2" style={{ borderColor: B.accL, color: B.accL }}>{t.trialLifetime || "Lifetime Access - $499"}</a>}
-                  <p className="text-xs text-center" style={{ color: B.mut }}>{t.secureCheckout || "Secure checkout via Stripe. Cancel anytime."}</p>
-                </div>
-              )}
+              <div className="space-y-2">
+  {!user && (
+    <div className="rounded-xl p-3 mb-3 text-center" style={{ background: B.blueL }}>
+      <p className="text-xs mb-2 font-medium" style={{ color: B.blue }}>Sign in to purchase and sync your Pro status across devices</p>
+      <button onClick={() => { setShowPro(false); setShowAuth(true); }} className="px-4 py-2 rounded-lg text-xs font-semibold hover:opacity-90" style={{ background: B.blue, color: "#fff" }}>Sign In / Create Account</button>
+    </div>
+  )}
+  <button onClick={() => handleCheckout("monthly")} className="block w-full text-center py-3 rounded-xl font-bold text-sm transition-all hover:opacity-90" style={{ background: B.gold, color: B.pri }}>Monthly Plan — $29/mo</button>
+  <button onClick={() => handleCheckout("annual")} className="block w-full text-center py-3 rounded-xl font-bold text-sm transition-all hover:opacity-90 border-2" style={{ borderColor: B.gold, color: B.gold }}>Annual Plan — $199/yr (save 43%)</button>
+  <button onClick={() => handleCheckout("lifetime")} className="block w-full text-center py-3 rounded-xl font-bold text-sm transition-all hover:opacity-90 border-2" style={{ borderColor: B.accL, color: B.accL }}>Lifetime Access — $299 once</button>
+  <p className="text-xs text-center" style={{ color: B.mut }}>Secure checkout via Stripe. Cancel anytime.</p>
+</div>
               {/* Code Activation */}
               <div style={{ borderTop: `1px solid ${B.brd}`, paddingTop: 16 }}>
                 <h3 className="font-bold mb-2 text-sm" style={{ color: B.txt }}>{t.haveCode || "Have a Pro code?"}</h3>
