@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useRef } from "react";
+import { supabase } from "./supabase";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend,
   LineChart, Line, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, AreaChart, Area,
@@ -9,6 +10,9 @@ import {
   Users, Star, Zap, FileText, GitCompare, Settings, Menu, X, Copy, Download, Plus, Trash2,
   ArrowUpRight, ArrowDownRight, Target, Shield, Award, Briefcase, Key, MapPin, Hash,
 } from "lucide-react";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+import BudgetPlanner from "./BudgetPlanner";
 
 // ═══════════════════════════════════════════════════════════════
 // CONSTANTS & BRAND
@@ -26,7 +30,7 @@ const fmtK = (n) => n == null || isNaN(n) ? "$0" : Math.abs(n) >= 1000 ? `$${(n/
 const fp = (n) => n == null || isNaN(n) ? "0%" : `${n.toFixed(1)}%`;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-const PRO_CODE = "DEALCLARITYPRO2024";
+const PRO_CODE = "DEALCLARITYPRO2026";
 
 // ═══════════════════════════════════════════════════════════════
 // TRANSLATIONS (EN / ES)
@@ -53,20 +57,20 @@ const T = {
     savePortfolio: "Save to Portfolio", saved: "Saved!", exportPdf: "Export PDF Report",
     pdfHint: "Report opened! Click 'Save as PDF' or use Ctrl+P / Cmd+P.",
     // Pro box
-    goPro: "Go Pro", proPrice: "from $9/mo",
+    goPro: "Go Pro", proPrice: "from $29/mo",
     proDesc: "PDF reports for lenders, unlimited what-if scenarios, CPA-ready annual summaries, deal sync across devices.",
     startTrial: "Start 7-Day Free Trial",
     // Pro modal
     proTitle: "DealClarity Pro", proSub: "The full toolkit for serious operators",
-    trialNote: "Cancel anytime.", annualSave: "$79/year (save 27%)",
-    lifetimeOffer: "$199 lifetime (one-time)", secureCheckout: "Secure checkout via Stripe. Cancel anytime.",
+    trialNote: "Cancel anytime.", annualSave: "$249/year (save 29%)",
+    lifetimeOffer: "$499 lifetime (one-time)", secureCheckout: "Secure checkout via Stripe. Cancel anytime.",
     getEarlyAccess: "Get Early Access", notifyLaunch: "We'll notify you when Pro launches.",
     enterEmail: "Enter your email to get notified", onTheList: "You're on the list!",
     notifyEmail: "We'll notify", whenLaunches: "when Pro launches.",
     backToAnalyzer: "Back to Analyzer",
-    trialMonthly: "Monthly - $9/mo",
-    trialAnnual: "Annual - $79/yr (save 27%)",
-    trialLifetime: "Lifetime - $199 (one-time)",
+    trialMonthly: "Monthly - $29/mo",
+    trialAnnual: "Annual - $249/yr (save 27%)",
+    trialLifetime: "Lifetime - $499 (one-time)",
     haveCode: "Have a Pro code?",
     // Pro features
     f1: "8 deal type analyzers", f2: "Save unlimited deals", f3: "Side-by-side comparison",
@@ -313,6 +317,7 @@ const getPages = (t) => [
   { id: "compare", label: t.compare, icon: GitCompare },
   { id: "splits", label: t.splits, icon: Users },
   { id: "sensitivity", label: t.whatIf, icon: Target },
+  { id: "budget", label: "Budget", icon: PiggyBank },
 ];
 const getGrades = (t) => [
   { min: 90, grade: "A+", color: "#16A34A", bg: "#DCFCE7", label: t.gradeAp },
@@ -459,6 +464,47 @@ const DEFAULTS = {
   multi: { name: "", purchasePrice: 1200000, units: 12, avgRentPerUnit: 950, closingBuy: 3, downPayment: 25, loanRate: 6.5, loanTerm: 30, vacancyRate: 7, monthlyInsurancePerUnit: 80, monthlyTaxesPerUnit: 120, monthlyMaintenancePerUnit: 100, monthlyPMPercent: 8, monthlyCapExPerUnit: 75, monthlyCommonArea: 400, annualAdminCost: 6000, appreciationRate: 3, rentGrowthRate: 2, exitCapRate: 7, holdYears: 5 },
   mhp: { name: "", purchasePrice: 800000, lots: 50, occupiedLots: 40, lotRent: 350, closingBuy: 3, downPayment: 25, loanRate: 6.5, loanTerm: 25, vacancyRate: 10, monthlyInsurance: 800, monthlyTaxes: 1500, monthlyMaintenance: 1200, monthlyPMPercent: 8, monthlyUtilities: 600, monthlyAdmin: 500, monthlyCapEx: 500, infillCostPerLot: 15000, marketLotRent: 400, appreciationRate: 3 },
   storage: { name: "", purchasePrice: 600000, totalUnits: 100, occupiedUnits: 80, avgRentPerUnit: 95, closingBuy: 3, downPayment: 25, loanRate: 6.5, loanTerm: 25, monthlyInsurance: 500, monthlyTaxes: 800, monthlyMaintenance: 600, monthlyPMPercent: 8, monthlyUtilities: 400, monthlyMarketing: 300, monthlyAdmin: 400, monthlyCapEx: 400, appreciationRate: 3, marketRatePerUnit: 110 },
+};
+
+// ═══════════════════════════════════════════════════════════════
+// DEAL TEMPLATES
+// ═══════════════════════════════════════════════════════════════
+const TEMPLATES = {
+  flip: [
+    { name: "Conservative Flip", data: { ...DEFAULTS.flip, purchasePrice: 150000, rehabCost: 25000, arv: 235000, holdMonths: 4, interestRate: 10, loanAmount: 120000 } },
+    { name: "Value-Add Rehab", data: { ...DEFAULTS.flip, purchasePrice: 200000, rehabCost: 55000, arv: 360000, holdMonths: 5, interestRate: 10, loanAmount: 170000 } },
+    { name: "Cosmetic Only", data: { ...DEFAULTS.flip, purchasePrice: 260000, rehabCost: 12000, arv: 365000, holdMonths: 3, interestRate: 10, loanAmount: 234000 } },
+  ],
+  brrrr: [
+    { name: "Textbook BRRRR", data: { ...DEFAULTS.brrrr, purchasePrice: 120000, rehabCost: 30000, arv: 230000, refiLTV: 65, monthlyRent: 2200, refiRate: 7, loanAmount: 96000, interestRate: 10 } },
+    { name: "High-Rent Market", data: { ...DEFAULTS.brrrr, purchasePrice: 200000, rehabCost: 45000, arv: 340000, refiLTV: 70, monthlyRent: 2800, refiRate: 6.5, loanAmount: 160000, interestRate: 10 } },
+  ],
+  rental: [
+    { name: "Value-Add Rental", data: { ...DEFAULTS.rental, purchasePrice: 150000, monthlyRent: 1950, downPayment: 30, loanRate: 7 } },
+    { name: "Mid-Market Rental", data: { ...DEFAULTS.rental, purchasePrice: 220000, monthlyRent: 2400, downPayment: 25, loanRate: 7 } },
+    { name: "DSCR Loan Deal", data: { ...DEFAULTS.rental, purchasePrice: 300000, monthlyRent: 3200, downPayment: 25, loanRate: 7.5 } },
+  ],
+  str: [
+    { name: "Mountain Cabin", data: { ...DEFAULTS.str, purchasePrice: 360000, nightlyRate: 195, occupancyRate: 62, furnishingCost: 18000, monthlyUtilities: 400 } },
+    { name: "Beach House", data: { ...DEFAULTS.str, purchasePrice: 550000, nightlyRate: 320, occupancyRate: 60, furnishingCost: 25000 } },
+    { name: "Urban STR", data: { ...DEFAULTS.str, purchasePrice: 280000, nightlyRate: 130, occupancyRate: 72, furnishingCost: 10000 } },
+  ],
+  wholesale: [
+    { name: "Quick Assign", data: { ...DEFAULTS.wholesale, contractPrice: 120000, assignmentFee: 12000, arv: 200000, estimatedRepairCost: 30000, holdingDays: 14 } },
+    { name: "Value Wholesale", data: { ...DEFAULTS.wholesale, contractPrice: 180000, assignmentFee: 20000, arv: 310000, estimatedRepairCost: 55000, holdingDays: 21 } },
+  ],
+  multi: [
+    { name: "8-Unit Value Add", data: { ...DEFAULTS.multi, purchasePrice: 600000, units: 8, avgRentPerUnit: 950, vacancyRate: 8 } },
+    { name: "20-Unit Stabilized", data: { ...DEFAULTS.multi, purchasePrice: 1800000, units: 20, avgRentPerUnit: 1200, vacancyRate: 5 } },
+  ],
+  mhp: [
+    { name: "Small MHP", data: { ...DEFAULTS.mhp, purchasePrice: 500000, lots: 30, occupiedLots: 22, lotRent: 320, marketLotRent: 380 } },
+    { name: "Value-Add Park", data: { ...DEFAULTS.mhp, purchasePrice: 1200000, lots: 80, occupiedLots: 55, lotRent: 280, marketLotRent: 400 } },
+  ],
+  storage: [
+    { name: "Small Facility", data: { ...DEFAULTS.storage, purchasePrice: 350000, totalUnits: 60, occupiedUnits: 45, avgRentPerUnit: 80, marketRatePerUnit: 95 } },
+    { name: "Value-Add Storage", data: { ...DEFAULTS.storage, purchasePrice: 900000, totalUnits: 150, occupiedUnits: 100, avgRentPerUnit: 75, marketRatePerUnit: 110 } },
+  ],
 };
 
 function calcFlip(f) {
@@ -860,11 +906,149 @@ const StorageInputs = ({ d, u, t }) => (<div className="space-y-4">
 const INPUTS = { flip: FlipInputs, brrrr: BrrrrInputs, rental: RentalInputs, str: STRInputs, wholesale: WholesaleInputs, multi: MultiInputs, mhp: MHPInputs, storage: StorageInputs };
 
 // ═══════════════════════════════════════════════════════════════
+// DEAL KILLER DETECTOR
+// ═══════════════════════════════════════════════════════════════
+const DEAL_KILLERS = {
+  flip: (c, d) => {
+    const flags = [];
+    if (c.roi < 10) flags.push({ level: "red", msg: `ROI is only ${c.roi?.toFixed(1)}%. Most lenders want 15%+ on a flip. Cut rehab by ${fmt(Math.abs((c.allIn * 0.15 - c.profit)))} or push ARV.` });
+    if (c.totHold > c.profit * 0.4) flags.push({ level: "red", msg: `Holding costs (${fmt(c.totHold)}) are eating ${((c.totHold / (c.profit + c.totHold)) * 100).toFixed(0)}% of your gross. Either reduce hold time or renegotiate the purchase price.` });
+    if (c.margin < 10) flags.push({ level: "red", msg: `Profit margin is under 10%. One surprise rehab line-item wipes this deal out.` });
+    if (d.holdPeriod > 9) flags.push({ level: "yellow", msg: `Hold period of ${d.holdPeriod} months is long. Carrying costs compound fast — model a 12-month scenario.` });
+    if (c.profit > 0 && c.roi >= 15 && c.margin >= 15) flags.push({ level: "green", msg: `Clean flip. Margins hold even if rehab runs 10% over or hold extends a month.` });
+    return flags;
+  },
+  brrrr: (c, d) => {
+    const flags = [];
+    if (c.moCF < 0) flags.push({ level: "red", msg: `Negative cash flow of ${fmt(c.moCF)}/mo after refi. Your tenant is not covering the mortgage. Fix the rent, the refi terms, or walk.` });
+    if (c.cashLeft > c.totalBefore * 0.6) flags.push({ level: "red", msg: `You're leaving ${fmt(c.cashLeft)} in the deal — ${((c.cashLeft / c.totalBefore) * 100).toFixed(0)}% of your original investment. This defeats the BRRRR strategy. Push the refi LTV or find a better lender.` });
+    if (d.refiLTV > 80) flags.push({ level: "yellow", msg: `80%+ LTV refi is aggressive. Most lenders cap at 75% on non-owner occupied. Model 70% to see the real downside.` });
+    if (c.coC < 6 && !c.infinite) flags.push({ level: "yellow", msg: `Cash-on-cash of ${c.coC?.toFixed(1)}% is below the 8% threshold most operators target. Compare against a straight rental before committing.` });
+    if (c.infinite || (c.cashLeft <= 0 && c.moCF > 0)) flags.push({ level: "green", msg: `All cash recovered at refi with positive cash flow. Textbook BRRRR execution.` });
+    return flags;
+  },
+  rental: (c, d) => {
+    const flags = [];
+    if (c.dscr < 1.0) flags.push({ level: "red", msg: `DSCR of ${c.dscr?.toFixed(2)} means your rental income doesn't cover the mortgage. No conventional lender will touch this. You need more rent or a lower purchase price.` });
+    if (c.moCF < 100) flags.push({ level: "red", msg: `Cash flow of ${fmt(c.moCF)}/mo leaves zero buffer. One vacancy month and you're out of pocket. Target $200+ minimum.` });
+    if (c.capRate < 4) flags.push({ level: "red", msg: `Cap rate of ${fp(c.capRate)} is below 4%. You're paying appreciation-market prices in a cash flow calculator. Either you're buying for equity growth (own that) or this is mispriced.` });
+    if (c.coC < 6) flags.push({ level: "yellow", msg: `Cash-on-cash of ${fp(c.coC)} is below most operators' 8% threshold. Check if a higher down payment or lower price changes the picture.` });
+    if (c.dscr >= 1.25 && c.moCF >= 200 && c.coC >= 8) flags.push({ level: "green", msg: `Strong lender profile. DSCR above 1.25, solid cash flow, and CoC above 8%. This deal gets financed.` });
+    return flags;
+  },
+  str: (c, d) => {
+    const flags = [];
+    if (c.breakEvenOcc > 70) flags.push({ level: "red", msg: `You need ${c.breakEvenOcc?.toFixed(0)}% occupancy just to break even. That leaves almost no margin for slow season or platform algorithm changes.` });
+    if (c.moCF < 0) flags.push({ level: "red", msg: `Negative cash flow at current occupancy assumptions. STR income is not guaranteed — a single bad review month could deepen this.` });
+    if (d.occupancyRate > 85) flags.push({ level: "yellow", msg: `85%+ occupancy is aggressive for most STR markets. Use AirDNA comps for your specific zip before relying on this number.` });
+    if (c.breakEvenOcc < 45 && c.moCF > 300) flags.push({ level: "green", msg: `Low break-even occupancy with strong projected cash flow. This deal has real downside protection.` });
+    return flags;
+  },
+  wholesale: (c, d) => {
+    const flags = [];
+    if (c.spread < 0) flags.push({ level: "red", msg: `Negative spread — you're paying more than the 70% ARV rule allows. Your end buyer has no margin. This deal won't assign.` });
+    if (c.profit < 5000) flags.push({ level: "yellow", msg: `Assignment fee under $5k. After your time and marketing cost, this barely makes sense. Push the fee or find a better deal.` });
+    if (d.holdingDays > 45) flags.push({ level: "yellow", msg: `45+ days to close increases the chance the deal falls apart or the seller gets cold feet. Tighten your buyer pipeline.` });
+    if (c.profit >= 10000 && c.spread > 15000) flags.push({ level: "green", msg: `Strong spread with a real fee. Your end buyer has room to make money — this one should move fast.` });
+    return flags;
+  },
+  multi: (c, d) => {
+    const flags = [];
+    if (c.dscr < 1.25) flags.push({ level: "red", msg: `DSCR of ${c.dscr?.toFixed(2)} is below the 1.25x minimum most commercial lenders require. This deal won't get financed as-is.` });
+    if (c.expenseRatio > 60) flags.push({ level: "red", msg: `Expense ratio of ${c.expenseRatio?.toFixed(0)}% is dangerously high. Industry standard for multifamily is 45-55%. Check your PM fee and maintenance estimates.` });
+    if (c.entryCapRate < 5) flags.push({ level: "yellow", msg: `Entry cap rate under 5% means you're buying on appreciation hopes, not cash flow. Know which game you're playing.` });
+    if (c.dscr >= 1.3 && c.coC >= 8 && c.expenseRatio < 55) flags.push({ level: "green", msg: `Lender-ready profile. Strong DSCR, healthy expense ratio, and solid CoC. This underwrites well.` });
+    return flags;
+  },
+  mhp: (c, d) => {
+    const flags = [];
+    if (c.dscr < 1.2) flags.push({ level: "red", msg: `MHP DSCR of ${c.dscr?.toFixed(2)} is tight. Community banks and credit unions (your likely lenders here) want 1.2x minimum.` });
+    if (c.capRate < 7) flags.push({ level: "yellow", msg: `Cap rate under 7% on a mobile home park means you're paying up. MHP deals typically trade at 8-12%. Check your purchase price.` });
+    if (c.effVac > 25) flags.push({ level: "red", msg: `Over 25% vacancy is a management problem, not just a value-add opportunity. Understand why lots are empty before closing.` });
+    if (c.capRate >= 8 && c.dscr >= 1.25 && c.upside > 0) flags.push({ level: "green", msg: `Solid cap rate with real value-add upside. MHP operators love this profile.` });
+    return flags;
+  },
+  storage: (c, d) => {
+    const flags = [];
+    if (c.dscr < 1.25) flags.push({ level: "red", msg: `DSCR of ${c.dscr?.toFixed(2)} won't satisfy most commercial lenders on a storage deal. Target 1.25x minimum.` });
+    if (c.capRate < 6) flags.push({ level: "yellow", msg: `Self-storage typically trades at 6-9% cap rates. Under 6% means you're paying for upside that may not materialize.` });
+    const occRate = c.occRate || 0;
+    if (occRate < 70) flags.push({ level: "yellow", msg: `Below 70% occupancy is below stabilized. Budget 12-18 months to reach 85%+ before your numbers look like this projection.` });
+    if (c.capRate >= 7 && c.dscr >= 1.3) flags.push({ level: "green", msg: `Clean storage deal. Stabilized cap rate and strong debt coverage.` });
+    return flags;
+  },
+};
+
+const TemplateSelector = ({ dealType, onLoad }) => {
+  const templates = TEMPLATES[dealType] || [];
+  if (!templates.length) return null;
+  return (
+    <div className="rounded-xl border overflow-hidden mb-4" style={{ borderColor: B.gold, background: B.goldL }}>
+      <div className="px-4 py-2 flex items-center gap-2" style={{ background: B.goldL, borderBottom: `1px solid ${B.gold}` }}>
+        <Zap size={14} style={{ color: B.goldD }} />
+        <span className="text-xs font-semibold" style={{ color: B.goldD }}>Quick Templates</span>
+      </div>
+      <div className="p-3 flex flex-wrap gap-2">
+        {templates.map((tmpl, i) => (
+          <button key={i} onClick={() => onLoad(tmpl.data)} className="px-3 py-1.5 rounded-lg text-xs font-medium border transition-all hover:opacity-80" style={{ background: "#fff", borderColor: B.gold, color: B.goldD }}>
+            {tmpl.name}
+          </button>
+        ))}
+        <button onClick={() => onLoad({ ...DEFAULTS[dealType] })} className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all hover:opacity-80" style={{ background: "transparent", color: B.mut }}>
+          Reset to defaults
+        </button>
+      </div>
+    </div>
+  );
+};
+const DealKillerDetector = ({ dealType, calc, dealData, t }) => {
+  const killerFn = DEAL_KILLERS[dealType];
+  if (!killerFn || !calc) return null;
+  const flags = killerFn(calc, dealData);
+  if (!flags.length) return null;
+  const reds = flags.filter(f => f.level === "red");
+  const yellows = flags.filter(f => f.level === "yellow");
+  const greens = flags.filter(f => f.level === "green");
+  return (
+    <div className="space-y-2">
+      {reds.map((f, i) => (
+        <div key={i} className="rounded-xl p-4 flex gap-3" style={{ background: "#FFF1F1", border: `1.5px solid ${B.red}` }}>
+          <AlertTriangle size={18} style={{ color: B.red, flexShrink: 0, marginTop: 1 }} />
+          <div>
+            <p className="text-xs font-bold mb-0.5" style={{ color: B.red }}>DEAL KILLER</p>
+            <p className="text-xs" style={{ color: "#7F1D1D" }}>{f.msg}</p>
+          </div>
+        </div>
+      ))}
+      {yellows.map((f, i) => (
+        <div key={i} className="rounded-xl p-4 flex gap-3" style={{ background: "#FFFBEB", border: `1.5px solid ${B.gold}` }}>
+          <AlertTriangle size={18} style={{ color: B.gold, flexShrink: 0, marginTop: 1 }} />
+          <div>
+            <p className="text-xs font-bold mb-0.5" style={{ color: B.goldD }}>WATCH OUT</p>
+            <p className="text-xs" style={{ color: "#78350F" }}>{f.msg}</p>
+          </div>
+        </div>
+      ))}
+      {greens.map((f, i) => (
+        <div key={i} className="rounded-xl p-4 flex gap-3" style={{ background: B.grnL, border: `1.5px solid ${B.grn}` }}>
+          <Check size={18} style={{ color: B.grn, flexShrink: 0, marginTop: 1 }} />
+          <div>
+            <p className="text-xs font-bold mb-0.5" style={{ color: B.grn }}>DEAL CHECKS OUT</p>
+            <p className="text-xs" style={{ color: "#14532D" }}>{f.msg}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════
 // DEAL RESULTS
 // ═══════════════════════════════════════════════════════════════
 const FlipResults = ({ c, t }) => (<div className="space-y-4">
   <RealityCheck naive={c.naive} real={c.profit} t={t} />
   <DealScore score={c.score} t={t} />
+  <DealKillerDetector dealType="flip" calc={c} dealData={c._inputs || c} t={t} />
   <div className="grid grid-cols-2 gap-3">
     <Stat icon={DollarSign} label={t?.outTrueNetProfit || "TRUE NET PROFIT"} value={fmt(c.profit)} color={c.profit >= 0 ? B.grn : B.red} bg={c.profit >= 0 ? B.grnL : B.redL} sub={`${fmt(c.profitPerMonth)}/month held`} />
     <Stat icon={TrendingUp} label={t?.outROI || "ROI"} value={fp(c.roi)} color={c.roi >= 0 ? B.pri : B.red} sub={`${fp(c.annRoi)} annualized`} />
@@ -878,6 +1062,7 @@ const FlipResults = ({ c, t }) => (<div className="space-y-4">
 const BrrrrResults = ({ c, t }) => (<div className="space-y-4">
   <RealityCheck naive={c.naive} real={c.moCF} label1={t?.naiveMonthCF || "Naive monthly CF"} label2={t?.trueCFMo || "True CF/mo"} t={t} />
   <DealScore score={c.score} t={t} />
+  <DealKillerDetector dealType="brrrr" calc={c} dealData={c._inputs || c} t={t} />
   <div className="grid grid-cols-2 gap-3">
     <Stat icon={DollarSign} label={t?.outCashLeftInDeal || "CASH LEFT IN DEAL"} value={c.cashLeft <= 0 ? "$0 (ALL OUT!)" : fmt(c.cashLeft)} color={c.cashLeft <= 0 ? B.grn : B.gold} bg={c.cashLeft <= 0 ? B.grnL : B.goldL} sub={c.infinite ? "INFINITE ROI" : `Invested ${fmt(c.totalBefore)}`} />
     <Stat icon={TrendingUp} label={t?.outMonthlyCF || "MONTHLY CASH FLOW"} value={fmt(c.moCF)} color={c.moCF >= 0 ? B.grn : B.red} bg={c.moCF >= 0 ? B.grnL : B.redL} sub={`${fmt(c.annCF)}/year`} />
@@ -890,6 +1075,7 @@ const BrrrrResults = ({ c, t }) => (<div className="space-y-4">
 const RentalResults = ({ c, t }) => (<div className="space-y-4">
   <RealityCheck naive={c.naive} real={c.moCF} label1={t?.naiveMonthCF || "Naive monthly CF"} label2={t?.trueMonthCF || "True monthly CF"} t={t} />
   <DealScore score={c.score} t={t} />
+  <DealKillerDetector dealType="rental" calc={c} dealData={c._inputs || c} t={t} />
   <div className="grid grid-cols-2 gap-3">
     <Stat icon={DollarSign} label={t?.outMonthlyCF || "MONTHLY CASH FLOW"} value={fmt(c.moCF)} color={c.moCF >= 0 ? B.grn : B.red} bg={c.moCF >= 0 ? B.grnL : B.redL} sub={`${fmt(c.annCF)}/year`} />
     <Stat icon={Percent} label={t?.outCashOnCash || "CASH-ON-CASH"} value={fp(c.coC)} color={c.coC >= 8 ? B.grn : B.gold} sub={`${fmt(c.cashIn)} invested`} />
@@ -910,6 +1096,7 @@ const RentalResults = ({ c, t }) => (<div className="space-y-4">
 const STRResults = ({ c, t }) => (<div className="space-y-4">
   <RealityCheck naive={c.naive} real={c.moCF} label1={t?.naiveMonthCF || "Naive monthly CF"} label2={t?.trueMonthCF || "True monthly CF"} t={t} />
   <DealScore score={c.score} t={t} />
+  <DealKillerDetector dealType="str" calc={c} dealData={c._inputs || c} t={t} />
   <div className="grid grid-cols-2 gap-3">
     <Stat icon={DollarSign} label={t?.outMonthlyCF || "MONTHLY CASH FLOW"} value={fmt(c.moCF)} color={c.moCF >= 0 ? B.grn : B.red} bg={c.moCF >= 0 ? B.grnL : B.redL} sub={`${fmt(c.annCF)}/year`} />
     <Stat icon={Percent} label={t?.outCashOnCash || "CASH-ON-CASH"} value={fp(c.coC)} color={c.coC >= 10 ? B.grn : B.gold} sub={`${fmt(c.cashIn)} invested`} />
@@ -921,6 +1108,7 @@ const STRResults = ({ c, t }) => (<div className="space-y-4">
 
 const WholesaleResults = ({ c, t }) => (<div className="space-y-4">
   <DealScore score={c.score} t={t} />
+  <DealKillerDetector dealType="wholesale" calc={c} dealData={c._inputs || c} t={t} />
   <div className="grid grid-cols-2 gap-3">
     <Stat icon={DollarSign} label={t?.outNetProfit || "NET PROFIT"} value={fmt(c.profit)} color={c.profit >= 0 ? B.grn : B.red} bg={c.profit >= 0 ? B.grnL : B.redL} sub={t?.afterAllCosts || "After all costs"} />
     <Stat icon={TrendingUp} label={t?.outROI || "ROI"} value={fp(c.roi)} color={B.pri} sub={`${fp(c.annRoi)} annualized`} />
@@ -933,6 +1121,7 @@ const WholesaleResults = ({ c, t }) => (<div className="space-y-4">
 const MultiResults = ({ c, t }) => (<div className="space-y-4">
   <RealityCheck naive={c.naive} real={c.moCF} label1={t?.naiveMonthCF || "Naive monthly CF"} label2={t?.trueMonthCF || "True monthly CF"} t={t} />
   <DealScore score={c.score} t={t} />
+  <DealKillerDetector dealType="multi" calc={c} dealData={c._inputs || c} t={t} />
   <div className="grid grid-cols-2 gap-3">
     <Stat icon={DollarSign} label={t?.outAnnualCF || "ANNUAL CASH FLOW"} value={fmt(c.annCF)} color={c.annCF >= 0 ? B.grn : B.red} bg={c.annCF >= 0 ? B.grnL : B.redL} sub={`${fmt(c.moCF)}/month`} />
     <Stat icon={Percent} label={t?.outCashOnCash || "CASH-ON-CASH"} value={fp(c.coC)} color={c.coC >= 8 ? B.grn : B.gold} sub={`${fmt(c.cashIn)} invested`} />
@@ -959,6 +1148,7 @@ const MultiResults = ({ c, t }) => (<div className="space-y-4">
 const MHPResults = ({ c, t }) => (<div className="space-y-4">
   <RealityCheck naive={c.naive} real={c.moCF} label1={t?.naiveMonthCF || "Naive monthly CF"} label2={t?.trueMonthCF || "True monthly CF"} t={t} />
   <DealScore score={c.score} t={t} />
+  <DealKillerDetector dealType="mhp" calc={c} dealData={c._inputs || c} t={t} />
   <div className="grid grid-cols-2 gap-3">
     <Stat icon={DollarSign} label={t?.outAnnualCF || "ANNUAL CASH FLOW"} value={fmt(c.annCF)} color={c.annCF >= 0 ? B.grn : B.red} bg={c.annCF >= 0 ? B.grnL : B.redL} sub={`${fmt(c.moCF)}/month`} />
     <Stat icon={Percent} label={t?.outCapRate || "CAP RATE"} value={fp(c.capRate)} color={c.capRate >= 8 ? B.grn : B.gold} sub={`NOI: ${fmt(c.noi)}/yr`} />
@@ -978,6 +1168,7 @@ const MHPResults = ({ c, t }) => (<div className="space-y-4">
 const StorageResults = ({ c, t }) => (<div className="space-y-4">
   <RealityCheck naive={c.naive} real={c.moCF} label1={t?.naiveMonthCF || "Naive monthly CF"} label2={t?.trueMonthCF || "True monthly CF"} t={t} />
   <DealScore score={c.score} t={t} />
+  <DealKillerDetector dealType="storage" calc={c} dealData={c._inputs || c} t={t} />
   <div className="grid grid-cols-2 gap-3">
     <Stat icon={DollarSign} label={t?.outAnnualCF || "ANNUAL CASH FLOW"} value={fmt(c.annCF)} color={c.annCF >= 0 ? B.grn : B.red} bg={c.annCF >= 0 ? B.grnL : B.redL} sub={`${fmt(c.moCF)}/month`} />
     <Stat icon={Percent} label={t?.outCapRate || "CAP RATE"} value={fp(c.capRate)} color={c.capRate >= 8 ? B.grn : B.gold} />
@@ -998,7 +1189,7 @@ const RESULTS = { flip: FlipResults, brrrr: BrrrrResults, rental: RentalResults,
 // ═══════════════════════════════════════════════════════════════
 // PAGE: PORTFOLIO
 // ═══════════════════════════════════════════════════════════════
-const Portfolio = ({ deals, removeDeal, exportPDF, t, getGradeL, localDealTypes }) => {
+const Portfolio = ({ deals, removeDeal, editDeal, exportPDF, t, getGradeL, localDealTypes }) => {
   if (!deals.length) return (<div className="text-center py-16"><Briefcase size={48} style={{ color: B.brd, margin: "0 auto 12px" }} /><h3 className="text-lg font-bold mb-2" style={{ color: B.txt }}>{t.noDealsTitle}</h3><p className="text-sm" style={{ color: B.mut }}>{t.noDealsDesc}</p></div>);
   const totalInvested = deals.reduce((s, d) => s + (d.calc.cashIn || d.calc.cash || d.calc.totalCost || 0), 0);
   const totalCF = deals.reduce((s, d) => s + (d.calc.annCF || d.calc.profit || 0), 0);
@@ -1016,8 +1207,8 @@ const Portfolio = ({ deals, removeDeal, exportPDF, t, getGradeL, localDealTypes 
       <Sec title={t.dealsByType} icon={BarChart3}><CostPie data={typeData} height={180} /></Sec>
       <Sec title={t.dealScores} icon={Award}><div style={{ height: 180 }}><ResponsiveContainer><BarChart data={deals.map(d => ({ name: d.data.name || `${d.type}`, score: Math.round(d.calc.score) }))} margin={{ left: 5, right: 5 }}><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis domain={[0, 100]} tick={{ fontSize: 10 }} /><Tooltip /><Bar dataKey="score" fill={B.pri} radius={[3, 3, 0, 0]}>{deals.map((d, i) => <Cell key={i} fill={getGradeL(d.calc.score).color} />)}</Bar></BarChart></ResponsiveContainer></div></Sec>
     </div>
-    <Sec title={t.allDeals} icon={FileText}><div className="space-y-2">{deals.map((d) => { const g = getGradeL(d.calc.score); const type = localDealTypes.find(dt => dt.id === d.type); return (<div key={d.id} className="flex items-center justify-between p-3 rounded-lg border" style={{ borderColor: B.brd }}><div className="flex items-center gap-3"><div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-black" style={{ background: g.bg, color: g.color }}>{g.grade}</div><div><div className="text-sm font-medium" style={{ color: B.txt }}>{d.data.name || `${type?.label} Deal`}</div><div className="text-xs" style={{ color: B.mut }}>{type?.label} | {d.calc.moCF != null ? `${fmt(d.calc.moCF)}/mo` : d.calc.profit != null ? fmt(d.calc.profit) : ""}</div></div></div><div className="flex items-center gap-1"><button onClick={() => exportPDF(d)} title={t.exportPdf} className="p-1.5 rounded hover:opacity-70" style={{ color: B.gold }}><Download size={14} /></button><button onClick={() => removeDeal(d.id)} className="p-1.5 rounded hover:bg-red-50"><Trash2 size={14} style={{ color: B.red }} /></button></div></div>); })}</div></Sec>
-  </div>);
+    <Sec title={t.allDeals} icon={FileText}><div className="space-y-2">{deals.map((d) => { const g = getGradeL(d.calc.score); const type = localDealTypes.find(dt => dt.id === d.type); return (<div key={d.id} className="flex items-center justify-between p-3 rounded-lg border" style={{ borderColor: B.brd }}><div className="flex items-center gap-3"><div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-black" style={{ background: g.bg, color: g.color }}>{g.grade}</div><div><div className="text-sm font-medium" style={{ color: B.txt }}>{d.data.name || `${type?.label} Deal`}</div><div className="text-xs" style={{ color: B.mut }}>{type?.label} | {d.calc.moCF != null ? `${fmt(d.calc.moCF)}/mo` : d.calc.profit != null ? fmt(d.calc.profit) : ""}</div></div></div><div className="flex items-center gap-1"><button onClick={() => exportPDF(d)} title={t.exportPdf} className="p-1.5 rounded hover:opacity-70" style={{ color: B.gold }}><Download size={14} /></button><button onClick={() => editDeal(d)} title="Edit Deal" className="p-1.5 rounded hover:opacity-70" style={{ color: B.acc }}><Settings size={14} /></button><button onClick={() => removeDeal(d.id)} className="p-1.5 rounded hover:bg-red-50"><Trash2 size={14} style={{ color: B.red }} /></button></div></div>); })}</div></Sec>
+      </div>);
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -1040,59 +1231,411 @@ const Compare = ({ deals, t, localDealTypes }) => {
 };
 
 // ═══════════════════════════════════════════════════════════════
-// PAGE: SPLITS
+// PAGE: SPLITS (UPGRADED - multi-partner, saved deal linking, pie chart)
 // ═══════════════════════════════════════════════════════════════
-const Splits = ({ t }) => {
-  const [d, setD] = useState({ totalProfit: 100000, p1Name: "You", p2Name: "Partner", p1Cash: 70, p2Cash: 30, p1Work: 80, p2Work: 20, cashWeight: 50 });
-  const u = (k, v) => setD(p => ({ ...p, [k]: v }));
-  const ww = 100 - d.cashWeight;
-  const p1S = (d.p1Cash * d.cashWeight / 100) + (d.p1Work * ww / 100);
-  const p2S = (d.p2Cash * d.cashWeight / 100) + (d.p2Work * ww / 100);
-  const tot = p1S + p2S; const p1P = tot > 0 ? (p1S / tot) * 100 : 50; const p2P = 100 - p1P;
-  const p1A = d.totalProfit * (p1P / 100), p2A = d.totalProfit * (p2P / 100);
-  return (<div className="space-y-6">
-    <Sec title={t.dealDetails} icon={Users}><div className="space-y-3">
-      <Input label={t.totalProfit} value={d.totalProfit} onChange={v => u("totalProfit", v)} />
-      <div className="flex gap-3"><Input sm label={t.partner1} value={d.p1Name} onChange={v => u("p1Name", v)} pre="" text /><Input sm label={t.partner2} value={d.p2Name} onChange={v => u("p2Name", v)} pre="" text /></div>
-    </div></Sec>
-    <Sec title={t.capitalPct} icon={DollarSign}><div className="flex gap-3"><Input sm label={d.p1Name} value={d.p1Cash} onChange={v => u("p1Cash", v)} pre="" suf="%" /><Input sm label={d.p2Name} value={d.p2Cash} onChange={v => u("p2Cash", v)} pre="" suf="%" /></div></Sec>
-    <Sec title={t.workEquity} icon={Zap}><div className="flex gap-3"><Input sm label={d.p1Name} value={d.p1Work} onChange={v => u("p1Work", v)} pre="" suf="%" /><Input sm label={d.p2Name} value={d.p2Work} onChange={v => u("p2Work", v)} pre="" suf="%" /></div></Sec>
-    <Sec title={t.weighting} icon={Target}><Input label={t.cashWeight} value={d.cashWeight} onChange={v => u("cashWeight", v)} pre="" suf="%" tip="Higher = capital matters more" /><div className="text-xs mt-2" style={{ color: B.mut }}>{t.workWeight}: {ww}%</div></Sec>
-    <div className="grid grid-cols-2 gap-4">
-      <div className="rounded-xl p-5 text-center border-2" style={{ borderColor: B.pri, background: B.grnL }}><div className="text-xs font-medium mb-1" style={{ color: B.mut }}>{d.p1Name}</div><div className="text-3xl font-black" style={{ color: B.pri }}>{fp(p1P)}</div><div className="text-lg font-bold" style={{ color: B.grn }}>{fmt(p1A)}</div></div>
-      <div className="rounded-xl p-5 text-center border-2" style={{ borderColor: B.gold, background: B.goldL }}><div className="text-xs font-medium mb-1" style={{ color: B.mut }}>{d.p2Name}</div><div className="text-3xl font-black" style={{ color: B.goldD }}>{fp(p2P)}</div><div className="text-lg font-bold" style={{ color: B.goldD }}>{fmt(p2A)}</div></div>
+const SPLIT_COLORS = [B.pri, B.gold, B.blue, B.purple, B.grn];
+const SPLIT_BGS = [B.grnL, B.goldL, B.blueL, "#EDE9FE", B.grnL];
+
+const Splits = ({ t, portfolio = [], localDealTypes = [] }) => {
+  const [linkedDeal, setLinkedDeal] = useState("");
+  const [partners, setPartners] = useState([
+    { name: "You", cashPct: 70, workPct: 80 },
+    { name: "Partner", cashPct: 30, workPct: 20 },
+  ]);
+  const [totalProfit, setTotalProfit] = useState(100000);
+  const [cashWeight, setCashWeight] = useState(50);
+  const [splitType, setSplitType] = useState("weighted");
+
+  // Link to saved deal: auto-populate profit
+  const linkDeal = (dealId) => {
+    setLinkedDeal(dealId);
+    if (dealId) {
+      const deal = portfolio.find(d => d.id === dealId);
+      if (deal?.calc) {
+        const p = deal.calc.profit || deal.calc.annCF || (deal.calc.moCF || 0) * 12;
+        setTotalProfit(Math.round(p));
+      }
+    }
+  };
+
+  const addPartner = () => {
+    if (partners.length >= 5) return;
+    setPartners([...partners, { name: `Partner ${partners.length}`, cashPct: 0, workPct: 0 }]);
+  };
+  const removePartner = (i) => {
+    if (partners.length <= 2) return;
+    setPartners(partners.filter((_, idx) => idx !== i));
+  };
+  const updatePartner = (i, key, val) => {
+    const next = [...partners];
+    next[i] = { ...next[i], [key]: val };
+    setPartners(next);
+  };
+
+  // Calculate splits
+  const workWeight = 100 - cashWeight;
+  const results = partners.map(p => {
+    if (splitType === "equal") return { ...p, share: 100 / partners.length };
+    if (splitType === "capital") return { ...p, share: p.cashPct };
+    // weighted (default)
+    return { ...p, score: (p.cashPct * cashWeight / 100) + (p.workPct * workWeight / 100) };
+  });
+
+  if (splitType === "weighted") {
+    const totalScore = results.reduce((s, r) => s + (r.score || 0), 0);
+    results.forEach(r => { r.share = totalScore > 0 ? ((r.score || 0) / totalScore) * 100 : 100 / partners.length; });
+  }
+
+  results.forEach(r => { r.amount = totalProfit * (r.share / 100); });
+  const totalCash = partners.reduce((s, p) => s + p.cashPct, 0);
+  const totalWork = partners.reduce((s, p) => s + p.workPct, 0);
+  const pieData = results.map((r, i) => ({ name: r.name, value: Math.round(r.share * 100) / 100 }));
+
+  return (
+    <div className="space-y-6">
+      {/* Deal linking */}
+      {portfolio.length > 0 && (
+        <div className="rounded-xl p-4 flex items-center gap-3 flex-wrap" style={{ background: B.blueL, border: `1px solid ${B.blue}30` }}>
+          <FileText size={16} style={{ color: B.blue, flexShrink: 0 }} />
+          <div className="flex-1 min-w-[200px]">
+            <label className="text-xs font-medium block mb-1" style={{ color: B.blue }}>Link to a saved deal (auto-fill profit)</label>
+            <select value={linkedDeal} onChange={e => linkDeal(e.target.value)} className="w-full p-2 rounded-lg border text-sm" style={{ borderColor: B.brd }}>
+              <option value="">Manual entry</option>
+              {portfolio.map(d => <option key={d.id} value={d.id}>{d.data.name || localDealTypes.find(dt => dt.id === d.type)?.label || "Deal"} - {fmt(d.calc?.profit || d.calc?.annCF || 0)}</option>)}
+            </select>
+          </div>
+        </div>
+      )}
+
+      {/* Deal details */}
+      <Sec title={t.dealDetails} icon={Users}>
+        <div className="space-y-3">
+          <Input label={t.totalProfit} value={totalProfit} onChange={v => setTotalProfit(v)} />
+          <div>
+            <label className="text-xs font-medium block mb-1" style={{ color: B.mut }}>Split Method</label>
+            <div className="flex gap-2">
+              {[["weighted", "Weighted"], ["equal", "Equal"], ["capital", "Capital Only"]].map(([k, l]) => (
+                <button key={k} onClick={() => setSplitType(k)} className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all" style={{ background: splitType === k ? B.pri : "transparent", color: splitType === k ? "#fff" : B.mut, border: `1px solid ${splitType === k ? B.pri : B.brd}` }}>{l}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </Sec>
+
+      {/* Partners */}
+      <Sec title="Partners" icon={Users}>
+        <div className="space-y-4">
+          {partners.map((p, i) => (
+            <div key={i} className="rounded-xl p-4 border" style={{ borderColor: SPLIT_COLORS[i % 5] + "40", background: SPLIT_BGS[i % 5] + "60" }}>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full" style={{ background: SPLIT_COLORS[i % 5] }} />
+                  <input type="text" value={p.name} onChange={e => updatePartner(i, "name", e.target.value)} className="bg-transparent text-sm font-bold outline-none border-b border-transparent focus:border-current" style={{ color: SPLIT_COLORS[i % 5], maxWidth: 140 }} />
+                </div>
+                {partners.length > 2 && <button onClick={() => removePartner(i)} className="text-xs px-2 py-1 rounded hover:opacity-70" style={{ color: B.red }}><Trash2 size={14} /></button>}
+              </div>
+              {splitType !== "equal" && (
+                <div className="flex gap-3">
+                  <div className="flex-1"><label className="text-[10px] font-medium block mb-1" style={{ color: B.mut }}>Capital %</label><input type="number" value={p.cashPct} onChange={e => updatePartner(i, "cashPct", Number(e.target.value))} className="w-full p-2 rounded-lg border text-sm text-center" style={{ borderColor: B.brd }} /></div>
+                  {splitType === "weighted" && <div className="flex-1"><label className="text-[10px] font-medium block mb-1" style={{ color: B.mut }}>Work/Sweat Equity %</label><input type="number" value={p.workPct} onChange={e => updatePartner(i, "workPct", Number(e.target.value))} className="w-full p-2 rounded-lg border text-sm text-center" style={{ borderColor: B.brd }} /></div>}
+                </div>
+              )}
+            </div>
+          ))}
+          {partners.length < 5 && (
+            <button onClick={addPartner} className="w-full py-2.5 rounded-xl text-xs font-medium border-2 border-dashed flex items-center justify-center gap-1 transition-all hover:opacity-70" style={{ borderColor: B.brd, color: B.mut }}>
+              <Plus size={14} /> Add Partner (up to 5)
+            </button>
+          )}
+        </div>
+      </Sec>
+
+      {/* Weighting slider (only for weighted mode) */}
+      {splitType === "weighted" && (
+        <Sec title={t.weighting} icon={Target}>
+          <Input label={t.cashWeight} value={cashWeight} onChange={v => setCashWeight(v)} pre="" suf="%" tip="Higher = capital contribution matters more than work" />
+          <div className="flex justify-between mt-2">
+            <span className="text-[10px] font-medium" style={{ color: B.mut }}>Work weight: {workWeight}%</span>
+            <span className="text-[10px] font-medium" style={{ color: B.mut }}>Cash weight: {cashWeight}%</span>
+          </div>
+          <div className="w-full h-2 rounded-full mt-1 overflow-hidden" style={{ background: B.brd }}>
+            <div className="h-full rounded-full" style={{ width: `${cashWeight}%`, background: `linear-gradient(90deg, ${B.gold}, ${B.pri})` }} />
+          </div>
+        </Sec>
+      )}
+
+      {/* Validation warnings */}
+      {totalCash !== 100 && splitType !== "equal" && (
+        <div className="rounded-xl p-3 flex items-center gap-2" style={{ background: B.goldL, border: `1px solid ${B.gold}` }}>
+          <AlertTriangle size={14} style={{ color: B.goldD, flexShrink: 0 }} />
+          <p className="text-xs" style={{ color: B.goldD }}>Capital percentages total {totalCash}% (should be 100%). Adjust so the math is clean.</p>
+        </div>
+      )}
+
+      {/* Pie chart */}
+      <div className="rounded-xl p-5 border" style={{ borderColor: B.brd }}>
+        <h3 className="text-sm font-bold mb-3 text-center" style={{ color: B.txt }}>Split Breakdown</h3>
+        <div style={{ height: 200 }}>
+          <ResponsiveContainer>
+            <PieChart>
+              <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={3}>
+                {pieData.map((_, i) => <Cell key={i} fill={SPLIT_COLORS[i % 5]} />)}
+              </Pie>
+              <Tooltip formatter={v => `${v.toFixed(1)}%`} />
+              <Legend />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Result cards */}
+      <div className={`grid gap-4 ${partners.length <= 3 ? `grid-cols-${partners.length}` : "grid-cols-2"}`} style={{ gridTemplateColumns: partners.length <= 3 ? `repeat(${partners.length}, 1fr)` : "repeat(2, 1fr)" }}>
+        {results.map((r, i) => (
+          <div key={i} className="rounded-xl p-5 text-center border-2" style={{ borderColor: SPLIT_COLORS[i % 5], background: SPLIT_BGS[i % 5] }}>
+            <div className="w-8 h-8 rounded-full mx-auto mb-2 flex items-center justify-center text-white text-xs font-bold" style={{ background: SPLIT_COLORS[i % 5] }}>{r.name.charAt(0)}</div>
+            <div className="text-xs font-medium mb-1" style={{ color: B.mut }}>{r.name}</div>
+            <div className="text-2xl font-black" style={{ color: SPLIT_COLORS[i % 5] }}>{fp(r.share)}</div>
+            <div className="text-lg font-bold" style={{ color: r.amount >= 0 ? B.grn : B.red }}>{fmt(Math.round(r.amount))}</div>
+            {splitType === "weighted" && <div className="text-[10px] mt-1" style={{ color: B.mut }}>Cash: {r.cashPct}% | Work: {r.workPct}%</div>}
+          </div>
+        ))}
+      </div>
     </div>
-  </div>);
+  );
 };
 
 // ═══════════════════════════════════════════════════════════════
-// PAGE: SENSITIVITY
+// PAGE: SENSITIVITY (UPGRADED - supports all 8 deal types)
 // ═══════════════════════════════════════════════════════════════
+const SENSITIVITY_VARS = {
+  flip: [
+    { key: "rehabCost", label: "Rehab Cost" }, { key: "purchasePrice", label: "Purchase Price" },
+    { key: "arv", label: "ARV" }, { key: "interestRate", label: "Interest Rate" },
+    { key: "holdMonths", label: "Hold Period (months)" }, { key: "agentCommission", label: "Agent Commission" },
+  ],
+  brrrr: [
+    { key: "rehabCost", label: "Rehab Cost" }, { key: "purchasePrice", label: "Purchase Price" },
+    { key: "monthlyRent", label: "Monthly Rent" }, { key: "refiLTV", label: "Refi LTV" },
+    { key: "refiRate", label: "Refi Rate" }, { key: "interestRate", label: "Interest Rate" },
+    { key: "vacancyRate", label: "Vacancy Rate" },
+  ],
+  rental: [
+    { key: "purchasePrice", label: "Purchase Price" }, { key: "monthlyRent", label: "Monthly Rent" },
+    { key: "loanRate", label: "Interest Rate" }, { key: "vacancyRate", label: "Vacancy Rate" },
+    { key: "downPayment", label: "Down Payment %" }, { key: "rehabCost", label: "Rehab Cost" },
+  ],
+  str: [
+    { key: "nightlyRate", label: "Nightly Rate" }, { key: "occupancyRate", label: "Occupancy Rate" },
+    { key: "purchasePrice", label: "Purchase Price" }, { key: "loanRate", label: "Interest Rate" },
+    { key: "platformFee", label: "Platform Fee" }, { key: "furnishingCost", label: "Furnishing Cost" },
+  ],
+  wholesale: [
+    { key: "assignmentFee", label: "Assignment Fee" }, { key: "contractPrice", label: "Contract Price" },
+    { key: "arv", label: "ARV" }, { key: "estimatedRepairCost", label: "Repair Cost" },
+  ],
+  multi: [
+    { key: "avgRentPerUnit", label: "Avg Rent / Unit" }, { key: "purchasePrice", label: "Purchase Price" },
+    { key: "vacancyRate", label: "Vacancy Rate" }, { key: "loanRate", label: "Interest Rate" },
+    { key: "exitCapRate", label: "Exit Cap Rate" }, { key: "units", label: "Total Units" },
+  ],
+  mhp: [
+    { key: "lotRent", label: "Lot Rent" }, { key: "purchasePrice", label: "Purchase Price" },
+    { key: "occupiedLots", label: "Occupied Lots" }, { key: "loanRate", label: "Interest Rate" },
+    { key: "marketLotRent", label: "Market Lot Rent" }, { key: "infillCostPerLot", label: "Infill Cost / Lot" },
+  ],
+  storage: [
+    { key: "avgRentPerUnit", label: "Avg Rent / Unit" }, { key: "purchasePrice", label: "Purchase Price" },
+    { key: "occupiedUnits", label: "Occupied Units" }, { key: "loanRate", label: "Interest Rate" },
+    { key: "marketRatePerUnit", label: "Market Rate / Unit" },
+  ],
+};
+
 const Sensitivity = ({ deals, t, getGradeL, localDealTypes }) => {
   const [si, setSi] = useState(0);
-  const [variable, setVariable] = useState("rehab");
+  const [varIdx, setVarIdx] = useState(0);
   const [range, setRange] = useState(30);
-  if (!deals.length) return (<div className="text-center py-16"><Target size={48} style={{ color: B.brd, margin: "0 auto 12px" }} /><h3 className="text-lg font-bold mb-2">{t.saveDealFirst}</h3><p className="text-sm" style={{ color: B.mut }}>{t.whatIfDesc}</p></div>);
-  const deal = deals[si] || deals[0];
-  const vm = { rehab: { key: "rehabCost", label: t.rehabCost }, purchase: { key: "purchasePrice", label: t.purchasePrice }, rent: { key: "monthlyRent", label: t.monthlyRent }, rate: { key: deal.type === "flip" ? "interestRate" : "loanRate", label: t.interestRate }, hold: { key: deal.type === "flip" ? "holdMonths" : "vacancyRate", label: deal.type === "flip" ? t.holdPeriod : t.vacancy } };
-  const avail = Object.entries(vm).filter(([, v]) => deal.data[v.key] !== undefined);
-  const v = vm[variable] || avail[0]?.[1]; if (!v) return null;
-  const bv = deal.data[v.key]; const calc = CALCS[deal.type];
-  const pts = [];
-  for (let p = -range; p <= range; p += range / 5) {
-    const adj = { ...deal.data, [v.key]: bv * (1 + p / 100) }; const r = calc(adj);
-    pts.push({ label: `${p >= 0 ? "+" : ""}${Math.round(p)}%`, value: Math.round(bv * (1 + p / 100)), profit: r.profit || r.annCF || (r.moCF || 0) * 12, score: Math.round(r.score) });
-  }
-  return (<div className="space-y-6">
-    <div className="flex gap-4 flex-wrap">
-      <div className="flex-1 min-w-48"><label className="text-xs font-medium mb-1 block" style={{ color: B.mut }}>{t.deal}</label><select value={si} onChange={e => setSi(Number(e.target.value))} className="w-full p-2 rounded-lg border text-sm" style={{ borderColor: B.brd }}>{deals.map((d, i) => <option key={d.id} value={i}>{d.data.name || localDealTypes.find(dt => dt.id === d.type)?.label}</option>)}</select></div>
-      <div className="flex-1 min-w-48"><label className="text-xs font-medium mb-1 block" style={{ color: B.mut }}>{t.variable}</label><select value={variable} onChange={e => setVariable(e.target.value)} className="w-full p-2 rounded-lg border text-sm" style={{ borderColor: B.brd }}>{avail.map(([k, v2]) => <option key={k} value={k}>{v2.label}</option>)}</select></div>
-      <div className="flex-1 min-w-24"><label className="text-xs font-medium mb-1 block" style={{ color: B.mut }}>{t.range}</label><select value={range} onChange={e => setRange(Number(e.target.value))} className="w-full p-2 rounded-lg border text-sm" style={{ borderColor: B.brd }}>{[10, 20, 30, 50].map(r => <option key={r} value={r}>+/-{r}%</option>)}</select></div>
+
+  if (!deals.length) return (
+    <div className="text-center py-16">
+      <Target size={48} style={{ color: B.brd, margin: "0 auto 12px" }} />
+      <h3 className="text-lg font-bold mb-2">{t.saveDealFirst}</h3>
+      <p className="text-sm" style={{ color: B.mut }}>{t.whatIfDesc}</p>
     </div>
-    <Sec title={`${t.whatIfTitle} ${v.label} ${t.changes}`} icon={Target}><div style={{ height: 220 }}><ResponsiveContainer><AreaChart data={pts} margin={{ left: 10, right: 10 }}><XAxis dataKey="label" tick={{ fontSize: 10 }} /><YAxis tickFormatter={v2 => fmtK(v2)} tick={{ fontSize: 10 }} /><Tooltip formatter={v2 => fmt(v2)} /><Area type="monotone" dataKey="profit" name={t.profitCF} stroke={B.pri} fill={B.acc} fillOpacity={0.3} /></AreaChart></ResponsiveContainer></div></Sec>
-    <Sec title={t.scoreImpact} icon={Award}><div style={{ height: 180 }}><ResponsiveContainer><LineChart data={pts} margin={{ left: 10, right: 10 }}><XAxis dataKey="label" tick={{ fontSize: 10 }} /><YAxis domain={[0, 100]} tick={{ fontSize: 10 }} /><Tooltip /><Line type="monotone" dataKey="score" name={t.score} stroke={B.gold} strokeWidth={3} dot={{ fill: B.gold }} /></LineChart></ResponsiveContainer></div></Sec>
-    <Sec title={t.dataTable} icon={FileText}><div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr style={{ background: "#F9FAFB" }}><th className="p-2 text-left font-medium" style={{ color: B.mut }}>{t.change}</th><th className="p-2 text-right font-medium" style={{ color: B.mut }}>{v.label}</th><th className="p-2 text-right font-medium" style={{ color: B.mut }}>{t.profitCF}</th><th className="p-2 text-right font-medium" style={{ color: B.mut }}>{t.score}</th></tr></thead><tbody>{pts.map((p, i) => (<tr key={i} className="border-t" style={{ borderColor: B.brd, background: p.label === "+0%" ? B.goldL : "transparent" }}><td className="p-2">{p.label}</td><td className="p-2 text-right">{v.key.includes("Rate") || v.key.includes("vacancy") ? `${p.value.toFixed?.(1) || p.value}%` : fmt(p.value)}</td><td className="p-2 text-right font-medium" style={{ color: p.profit >= 0 ? B.grn : B.red }}>{fmt(p.profit)}</td><td className="p-2 text-right"><span className="px-1.5 py-0.5 rounded text-xs font-bold" style={{ background: getGradeL(p.score).bg, color: getGradeL(p.score).color }}>{p.score}</span></td></tr>))}</tbody></table></div></Sec>
-  </div>);
+  );
+
+  const deal = deals[si] || deals[0];
+  const vars = (SENSITIVITY_VARS[deal.type] || []).filter(v => deal.data[v.key] !== undefined && deal.data[v.key] !== 0);
+  const v = vars[varIdx] || vars[0];
+  if (!v) return null;
+
+  const bv = deal.data[v.key];
+  const calc = CALCS[deal.type];
+  const isPercent = v.key.includes("Rate") || v.key.includes("vacancy") || v.key.includes("Percent") || v.key.includes("LTV") || v.key.includes("Fee") || v.key.includes("downPayment") || v.key.includes("Commission") || v.key.includes("occupancy");
+  const isInteger = v.key.includes("Months") || v.key.includes("months") || v.key.includes("Lots") || v.key.includes("lots") || v.key.includes("Units") || v.key.includes("units") || v.key.includes("Days");
+
+  const pts = [];
+  const steps = 11;
+  for (let i = 0; i < steps; i++) {
+    const p = -range + (2 * range * i) / (steps - 1);
+    const adjVal = bv * (1 + p / 100);
+    const adj = { ...deal.data, [v.key]: isInteger ? Math.round(adjVal) : adjVal };
+    const r = calc(adj);
+    const profit = r.profit != null ? r.profit : (r.annCF != null ? r.annCF : (r.moCF || 0) * 12);
+    pts.push({
+      label: `${p >= 0 ? "+" : ""}${Math.round(p)}%`,
+      pct: Math.round(p),
+      value: isInteger ? Math.round(adjVal) : adjVal,
+      profit: Math.round(profit),
+      moCF: r.moCF != null ? Math.round(r.moCF) : null,
+      score: Math.round(r.score),
+      roi: r.roi != null ? r.roi : (r.coC != null ? r.coC : null),
+    });
+  }
+
+  const baseIdx = Math.floor(steps / 2);
+  const baseProfit = pts[baseIdx]?.profit || 0;
+  const baseScore = pts[baseIdx]?.score || 0;
+  const worstProfit = Math.min(...pts.map(p => p.profit));
+  const bestProfit = Math.max(...pts.map(p => p.profit));
+  const breakEvenIdx = pts.findIndex((p, i) => i > 0 && ((pts[i-1].profit >= 0 && p.profit < 0) || (pts[i-1].profit < 0 && p.profit >= 0)));
+
+  return (
+    <div className="space-y-6">
+      {/* Header with deal summary */}
+      <div className="rounded-xl p-4" style={{ background: B.pri }}>
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h3 className="text-sm font-bold text-white">{deal.data.name || localDealTypes.find(dt => dt.id === deal.type)?.label || "Deal"}</h3>
+            <p className="text-xs" style={{ color: B.accL }}>Sensitivity Analysis - How does your deal hold up?</p>
+          </div>
+          <div className="flex gap-3">
+            <div className="text-center px-3 py-1 rounded-lg" style={{ background: B.acc }}>
+              <div className="text-xs" style={{ color: B.accL }}>Base Profit</div>
+              <div className="text-sm font-bold text-white">{fmt(baseProfit)}</div>
+            </div>
+            <div className="text-center px-3 py-1 rounded-lg" style={{ background: B.acc }}>
+              <div className="text-xs" style={{ color: B.accL }}>Score</div>
+              <div className="text-sm font-bold" style={{ color: B.gold }}>{baseScore}/100</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Controls */}
+      <div className="flex gap-4 flex-wrap">
+        <div className="flex-1 min-w-[180px]">
+          <label className="text-xs font-medium mb-1 block" style={{ color: B.mut }}>{t.deal}</label>
+          <select value={si} onChange={e => { setSi(Number(e.target.value)); setVarIdx(0); }} className="w-full p-2.5 rounded-lg border text-sm" style={{ borderColor: B.brd }}>
+            {deals.map((d, i) => <option key={d.id} value={i}>{d.data.name || localDealTypes.find(dt => dt.id === d.type)?.label}</option>)}
+          </select>
+        </div>
+        <div className="flex-1 min-w-[180px]">
+          <label className="text-xs font-medium mb-1 block" style={{ color: B.mut }}>{t.variable}</label>
+          <select value={varIdx} onChange={e => setVarIdx(Number(e.target.value))} className="w-full p-2.5 rounded-lg border text-sm" style={{ borderColor: B.brd }}>
+            {vars.map((vr, i) => <option key={vr.key} value={i}>{vr.label}</option>)}
+          </select>
+        </div>
+        <div className="flex-1 min-w-[100px]">
+          <label className="text-xs font-medium mb-1 block" style={{ color: B.mut }}>{t.range}</label>
+          <select value={range} onChange={e => setRange(Number(e.target.value))} className="w-full p-2.5 rounded-lg border text-sm" style={{ borderColor: B.brd }}>
+            {[10, 20, 30, 50].map(r => <option key={r} value={r}>+/- {r}%</option>)}
+          </select>
+        </div>
+      </div>
+
+      {/* Quick insight strip */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-xl p-3 text-center" style={{ background: B.redL, border: `1px solid ${B.red}30` }}>
+          <div className="text-[10px] font-medium" style={{ color: B.red }}>WORST CASE (-{range}%)</div>
+          <div className="text-sm font-bold" style={{ color: worstProfit >= 0 ? B.grn : B.red }}>{fmt(worstProfit)}</div>
+        </div>
+        <div className="rounded-xl p-3 text-center" style={{ background: B.goldL, border: `1px solid ${B.gold}30` }}>
+          <div className="text-[10px] font-medium" style={{ color: B.goldD }}>CURRENT</div>
+          <div className="text-sm font-bold" style={{ color: B.pri }}>{fmt(baseProfit)}</div>
+        </div>
+        <div className="rounded-xl p-3 text-center" style={{ background: B.grnL, border: `1px solid ${B.grn}30` }}>
+          <div className="text-[10px] font-medium" style={{ color: B.grn }}>BEST CASE (+{range}%)</div>
+          <div className="text-sm font-bold" style={{ color: B.grn }}>{fmt(bestProfit)}</div>
+        </div>
+      </div>
+
+      {breakEvenIdx > -1 && (
+        <div className="rounded-xl p-3 flex items-center gap-2" style={{ background: B.redL, border: `1px solid ${B.red}` }}>
+          <AlertTriangle size={16} style={{ color: B.red, flexShrink: 0 }} />
+          <p className="text-xs font-medium" style={{ color: "#7F1D1D" }}>
+            Break-even threshold: This deal turns negative around {pts[breakEvenIdx]?.label} change in {v.label.toLowerCase()}. Know your floor before committing.
+          </p>
+        </div>
+      )}
+
+      {/* Profit/CF chart */}
+      <Sec title={`${v.label}: Impact on Profit / Cash Flow`} icon={Target}>
+        <div style={{ height: 240 }}>
+          <ResponsiveContainer>
+            <AreaChart data={pts} margin={{ left: 10, right: 10, top: 5, bottom: 5 }}>
+              <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+              <YAxis tickFormatter={v2 => fmtK(v2)} tick={{ fontSize: 10 }} />
+              <Tooltip formatter={v2 => fmt(v2)} labelFormatter={l => `${v.label} ${l}`} />
+              <Area type="monotone" dataKey="profit" name={t.profitCF} stroke={B.pri} fill={B.acc} fillOpacity={0.3} strokeWidth={2} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </Sec>
+
+      {/* Score impact chart */}
+      <Sec title="Deal Score Sensitivity" icon={Award}>
+        <div style={{ height: 200 }}>
+          <ResponsiveContainer>
+            <BarChart data={pts} margin={{ left: 10, right: 10, top: 5, bottom: 5 }}>
+              <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+              <YAxis domain={[0, 100]} tick={{ fontSize: 10 }} />
+              <Tooltip formatter={v2 => [`${v2}/100`, "Score"]} labelFormatter={l => `${v.label} ${l}`} />
+              <Bar dataKey="score" name={t.score} radius={[4, 4, 0, 0]}>
+                {pts.map((p, i) => <Cell key={i} fill={getGradeL(p.score).color} fillOpacity={p.pct === 0 ? 1 : 0.7} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </Sec>
+
+      {/* Data table */}
+      <Sec title={t.dataTable} icon={FileText}>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr style={{ background: "#F9FAFB" }}>
+                <th className="p-2 text-left font-medium" style={{ color: B.mut }}>{t.change}</th>
+                <th className="p-2 text-right font-medium" style={{ color: B.mut }}>{v.label}</th>
+                <th className="p-2 text-right font-medium" style={{ color: B.mut }}>{t.profitCF}</th>
+                <th className="p-2 text-right font-medium" style={{ color: B.mut }}>vs. Base</th>
+                <th className="p-2 text-right font-medium" style={{ color: B.mut }}>{t.score}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pts.map((p, i) => {
+                const diff = p.profit - baseProfit;
+                return (
+                  <tr key={i} className="border-t" style={{ borderColor: B.brd, background: p.pct === 0 ? B.goldL : "transparent", fontWeight: p.pct === 0 ? 600 : 400 }}>
+                    <td className="p-2">{p.label}{p.pct === 0 ? " (current)" : ""}</td>
+                    <td className="p-2 text-right">{isPercent ? `${p.value.toFixed(1)}%` : isInteger ? p.value : fmt(p.value)}</td>
+                    <td className="p-2 text-right font-medium" style={{ color: p.profit >= 0 ? B.grn : B.red }}>{fmt(p.profit)}</td>
+                    <td className="p-2 text-right" style={{ color: diff > 0 ? B.grn : diff < 0 ? B.red : B.mut }}>
+                      {p.pct === 0 ? "-" : `${diff >= 0 ? "+" : ""}${fmt(diff)}`}
+                    </td>
+                    <td className="p-2 text-right">
+                      <span className="px-1.5 py-0.5 rounded text-xs font-bold" style={{ background: getGradeL(p.score).bg, color: getGradeL(p.score).color }}>
+                        {getGradeL(p.score).grade} ({p.score})
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Sec>
+    </div>
+  );
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -1174,14 +1717,10 @@ ${expRows ? `<h2 style="font-size:15px;font-weight:700;color:${B.pri};margin-bot
 }
 
 // ═══════════════════════════════════════════════════════════════
-// STRIPE CONFIG (Replace with your Stripe checkout links)
+// STRIPE CONFIG (checkout handled server-side via /api/create-checkout)
 // ═══════════════════════════════════════════════════════════════
-const STRIPE = {
-  monthly: "https://buy.stripe.com/4gMaEX37b8qd0iY7KL6Zy0g",
-  annual: "https://buy.stripe.com/14AcN57nr8qd9Ty7KL6Zy0h",
-  lifetime: "https://buy.stripe.com/9B68wP9vzeOBfdSe996Zy0i",
-};
-const hasStripe = STRIPE.monthly || STRIPE.annual || STRIPE.lifetime;
+const PLANS = { monthly: "Monthly", annual: "Annual", lifetime: "Lifetime" };
+const hasStripe = true; // Checkout goes through API, always available
 
 // ═══════════════════════════════════════════════════════════════
 // MAIN APP
@@ -1212,12 +1751,20 @@ export default function DealClarity() {
     try { const s = localStorage.getItem("dc_portfolio"); return s ? JSON.parse(s) : []; } catch { return []; }
   });
   const [mm, setMM] = useState(false);
+  const [editingDeal, setEditingDeal] = useState(null); // stores deal id being edited
   const [saved, setSaved] = useState(false);
   const [showPro, setShowPro] = useState(false);
   const [email, setEmail] = useState("");
   const [emailDone, setEmailDone] = useState(false);
   const [pdfMsg, setPdfMsg] = useState("");
   const [isPro, setIsPro] = useState(() => { try { return localStorage.getItem("dc_pro") === "true"; } catch { return false; } });
+  const [user, setUser] = useState(null);
+const [showAuth, setShowAuth] = useState(false);
+const [authEmail, setAuthEmail] = useState("");
+const [authPassword, setAuthPassword] = useState("");
+const [authMode, setAuthMode] = useState("signin");
+const [authError, setAuthError] = useState("");
+const [authLoading, setAuthLoading] = useState(false);
   const [proCode, setProCode] = useState("");
   const [proMsg, setProMsg] = useState("");
 
@@ -1226,17 +1773,40 @@ export default function DealClarity() {
     try { localStorage.setItem("dc_portfolio", JSON.stringify(p)); } catch {}
   }, []);
 
-  const activatePro = (code) => {
-    if (code === PRO_CODE) {
-      setIsPro(true);
-      try { localStorage.setItem("dc_pro", "true"); } catch {}
-      setProMsg("Pro activated! Full access unlocked.");
-      setTimeout(() => { setProMsg(""); setShowPro(false); }, 2000);
+  const activatePro = async (code) => {
+  if (code === PRO_CODE) {
+    setIsPro(true);
+    setProMsg("Pro activated! Full access unlocked.");
+    setTimeout(() => { setProMsg(""); setShowPro(false); }, 2000);
+  } else {
+    setProMsg("Invalid code. Please check and try again.");
+    setTimeout(() => setProMsg(""), 3000);
+  }
+};
+
+const handleAuth = async () => {
+  setAuthError(""); setAuthLoading(true);
+  try {
+    if (authMode === "signup") {
+      const { error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
+      if (error) throw error;
+      setAuthError("Check your email to confirm your account.");
     } else {
-      setProMsg("Invalid code. Please check and try again.");
-      setTimeout(() => setProMsg(""), 3000);
+      const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
+      if (error) throw error;
+      const { data: profile } = await supabase.from("profiles").select("is_pro, pro_type").eq("id", data.user.id).single();
+      setUser(data.user);
+      setIsPro(profile?.is_pro || false);
+      setShowAuth(false);
     }
-  };
+  } catch (e) { setAuthError(e.message); }
+  setAuthLoading(false);
+};
+
+const handleSignOut = async () => {
+  await supabase.auth.signOut();
+  setUser(null); setIsPro(false); setSavedDeals([]);
+};
 
   const cd = dealData[dealType];
   const uf = useCallback((k, v) => setDealData(p => {
@@ -1249,27 +1819,237 @@ export default function DealClarity() {
     }
     return next;
   }), [dealType]);
-  const calc = useMemo(() => CALCS[dealType]?.(cd), [dealType, cd]);
+  const calc = useMemo(() => {
+  const result = CALCS[dealType]?.(cd);
+  if (result) result._inputs = cd;
+  return result;
+}, [dealType, cd]);
   const saveDeal = () => {
-    if (!isPro && portfolio.length >= 2) {
-      setShowPro(true);
-      setPdfMsg("Free tier limited to 2 saved deals. Upgrade to Pro for unlimited.");
-      setTimeout(() => setPdfMsg(""), 4000);
-      return;
-    }
-    const next = [...portfolio, { id: uid(), type: dealType, data: { ...cd }, calc }];
-    setPortfolio(next); saveToStorage(next); setSaved(true); setTimeout(() => setSaved(false), 2000);
-  };
+  if (editingDeal) {
+    const next = portfolio.map(d =>
+      d.id === editingDeal ? { ...d, data: { ...cd }, calc } : d
+    );
+    setPortfolio(next);
+    saveToStorage(next);
+    setEditingDeal(null);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+    return;
+  }
+  if (!isPro && portfolio.length >= 2) { setShowPro(true); return; }
+  const next = [...portfolio, { id: uid(), type: dealType, data: { ...cd }, calc }];
+  setPortfolio(next);
+  saveToStorage(next);
+  setSaved(true);
+  setTimeout(() => setSaved(false), 2000);
+};
   const removeDeal = (id) => { const next = portfolio.filter(d => d.id !== id); setPortfolio(next); saveToStorage(next); };
+  const editDeal = (deal) => {
+  setDealType(deal.type);
+  setDealData(prev => ({ ...prev, [deal.type]: { ...deal.data } }));
+  setEditingDeal(deal.id);
+  setPage("analyze");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+};
 
   // PDF export
+  const handleCheckout = async (plan) => {
+  if (!user) { setShowAuth(true); return; }
+  try {
+    const res = await fetch("/api/create-checkout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan, email: user.email }),
+    });
+    const data = await res.json();
+    if (data.error) { alert(data.error); return; }
+    if (data.url) window.location.href = data.url;
+  } catch (e) {
+    alert("Checkout error. Please check your connection and try again.");
+  }
+};
   const exportPDF = (deal) => {
-    if (!isPro) { setShowPro(true); return; }
-    const html = generateReport(deal || { type: dealType, data: { ...cd }, calc });
-    const w = window.open("", "_blank");
-    if (w) { w.document.write(html); w.document.close(); }
-    setPdfMsg("Report opened! Click 'Save as PDF' or use Ctrl+P / Cmd+P."); setTimeout(() => setPdfMsg(""), 4000);
+  if (!isPro) { setShowPro(true); return; }
+const editDeal = (deal) => {
+  setDealType(deal.type);
+  setDealData(prev => ({ ...prev, [deal.type]: { ...deal.data } }));
+  setEditingDeal(deal.id);
+  setPage("analyze");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+};
+  const dealObj = deal || { type: dealType, data: { ...cd }, calc };
+  const tDeal = DEAL_TYPES.find(dt => dt.id === dealObj.type);
+  const c = dealObj.calc;
+  const g = getGrade(c.score);
+  const name = dealObj.data.name || `${tDeal?.label || "Deal"} Analysis`;
+  const date = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+
+  const doc = new jsPDF();
+  const gradeRGB = {
+    "A+": [22,163,74], "A": [22,163,74], "B": [37,99,235],
+    "C": [212,168,67], "D": [234,88,12], "F": [220,38,38]
   };
+  const gc = gradeRGB[g.grade] || [107,114,128];
+
+  // ── Header bar
+  doc.setFillColor(15, 26, 46);
+  doc.rect(0, 0, 210, 38, "F");
+  doc.setDrawColor(201, 165, 76);
+  doc.setLineWidth(1);
+  doc.line(0, 38, 210, 38);
+
+  doc.setTextColor(201, 165, 76);
+  doc.setFontSize(20);
+  doc.setFont("helvetica", "bold");
+  doc.text("DealClarity", 15, 18);
+
+  doc.setTextColor(163, 184, 212);
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "normal");
+  doc.text("True Profitability Report  |  Profit Clarity Advantage", 15, 26);
+  doc.text("dealclarity.vercel.app", 15, 32);
+
+  doc.setTextColor(200, 200, 200);
+  doc.setFontSize(8);
+  doc.text(date, 195, 26, { align: "right" });
+
+  // ── Deal name block
+  doc.setTextColor(15, 26, 46);
+  doc.setFontSize(15);
+  doc.setFont("helvetica", "bold");
+  doc.text(name, 15, 52);
+
+  doc.setTextColor(107, 114, 128);
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "normal");
+  doc.text(`${tDeal?.label} Analysis  |  ${tDeal?.desc}`, 15, 59);
+
+  // ── Grade badge
+  doc.setFillColor(...gc);
+  doc.roundedRect(15, 64, 42, 26, 3, 3, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(22);
+  doc.setFont("helvetica", "bold");
+  doc.text(g.grade, 36, 81, { align: "center" });
+  doc.setFontSize(7);
+  doc.setFont("helvetica", "normal");
+  doc.text(`${Math.round(c.score)}/100`, 36, 87, { align: "center" });
+
+  // ── Reality check box
+  const isHidden = c.hidden != null && c.hidden > 0;
+  if (c.naive != null) {
+    doc.setFillColor(...(isHidden ? [255,241,241] : [220,252,231]));
+    doc.roundedRect(62, 64, 133, 26, 3, 3, "F");
+    doc.setTextColor(...(isHidden ? [220,38,38] : [22,163,74]));
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.text(isHidden ? "REALITY CHECK" : "DEAL CHECKS OUT", 68, 74);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(80, 80, 80);
+    doc.setFontSize(8);
+    doc.text(`Basic calculator: ${fmt(c.naive)}`, 68, 81);
+    const trueVal = c.moCF != null ? fmt(c.moCF) : fmt(c.profit);
+    doc.text(`True number: ${trueVal}`, 68, 87);
+    if (isHidden) {
+      doc.setTextColor(220, 38, 38);
+      doc.setFont("helvetica", "bold");
+      doc.text(`${fmt(c.hidden)} in hidden costs`, 140, 87);
+    }
+  }
+
+  // ── Key metrics table
+  const metrics = [];
+  if (c.profit != null)       metrics.push(["Net Profit", fmt(c.profit)]);
+  if (c.moCF != null)         metrics.push(["Monthly Cash Flow", fmt(c.moCF)]);
+  if (c.annCF != null)        metrics.push(["Annual Cash Flow", fmt(c.annCF)]);
+  if (c.roi != null)          metrics.push(["ROI", fp(c.roi)]);
+  if (c.annRoi != null)       metrics.push(["Annualized ROI", fp(c.annRoi)]);
+  if (c.coC != null)          metrics.push(["Cash-on-Cash", c.infinite ? "Infinite" : fp(c.coC)]);
+  if (c.capRate != null)      metrics.push(["Cap Rate", fp(c.capRate)]);
+  if (c.entryCapRate != null) metrics.push(["Entry Cap Rate", fp(c.entryCapRate)]);
+  if (c.dscr != null)         metrics.push(["DSCR", c.dscr.toFixed(2)]);
+  if (c.noi != null)          metrics.push(["NOI", fmt(c.noi)]);
+  if (c.cashIn != null)       metrics.push(["Cash Invested", fmt(c.cashIn)]);
+  if (c.cash != null)         metrics.push(["Cash Out of Pocket", fmt(c.cash)]);
+  if (c.allIn != null)        metrics.push(["Total All-In Cost", fmt(c.allIn)]);
+  if (c.totHold != null)      metrics.push(["Total Holding Costs", fmt(c.totHold)]);
+  if (c.cashLeft != null)     metrics.push(["Cash Left in Deal", c.cashLeft <= 0 ? "$0 (All Out)" : fmt(c.cashLeft)]);
+  if (c.cashBack != null)     metrics.push(["Cash Back at Refi", fmt(c.cashBack)]);
+  if (c.margin != null)       metrics.push(["Profit Margin", fp(c.margin)]);
+  if (c.equityMultiple != null) metrics.push(["Equity Multiple", `${c.equityMultiple.toFixed(2)}x`]);
+  if (c.exitValue != null)    metrics.push(["Projected Exit Value", fmt(c.exitValue)]);
+  if (c.totalReturn != null)  metrics.push(["Total Return", fmt(c.totalReturn)]);
+  if (c.breakEvenOcc != null) metrics.push(["Break-Even Occupancy", fp(c.breakEvenOcc)]);
+  if (c.spread != null)       metrics.push(["Spread", fmt(c.spread)]);
+  if (c.pricePerUnit != null) metrics.push(["Price per Unit", fmt(c.pricePerUnit)]);
+  if (c.pricePerLot != null)  metrics.push(["Price per Lot", fmt(c.pricePerLot)]);
+
+  autoTable(doc, {
+    startY: 98,
+    head: [["Metric", "Value"]],
+    body: metrics,
+    theme: "striped",
+    headStyles: { fillColor: [15,26,46], textColor: [255,255,255], fontSize: 10, fontStyle: "bold" },
+    bodyStyles: { fontSize: 10 },
+    alternateRowStyles: { fillColor: [247,248,250] },
+    columnStyles: { 1: { halign: "right", fontStyle: "bold" } },
+    margin: { left: 15, right: 15 },
+  });
+
+  // ── Expenses table
+  const expData = c.expenses || c.costs || c.holding || [];
+  if (expData.length > 0) {
+    autoTable(doc, {
+      startY: doc.lastAutoTable.finalY + 8,
+      head: [["Cost / Expense Item", "Amount"]],
+      body: expData.map(e => [e.name, fmt(e.value)]),
+      theme: "striped",
+      headStyles: { fillColor: [42,64,102], textColor: [255,255,255], fontSize: 10, fontStyle: "bold" },
+      bodyStyles: { fontSize: 10 },
+      alternateRowStyles: { fillColor: [247,248,250] },
+      columnStyles: { 1: { halign: "right", fontStyle: "bold" } },
+      margin: { left: 15, right: 15 },
+    });
+  }
+
+  // ── Deal Killer flags in report
+  const killerFn = DEAL_KILLERS[dealObj.type];
+  const inputs = dealObj.data;
+  if (killerFn && inputs) {
+    const flags = killerFn(c, inputs);
+    if (flags.length > 0) {
+      autoTable(doc, {
+        startY: doc.lastAutoTable.finalY + 8,
+        head: [["⚠ Deal Analysis Flags"]],
+        body: flags.map(f => [`[${f.level === "red" ? "DEAL KILLER" : f.level === "yellow" ? "WATCH OUT" : "CHECKS OUT"}]  ${f.msg}`]),
+        theme: "plain",
+        headStyles: { fillColor: [201,165,76], textColor: [15,26,46], fontSize: 10, fontStyle: "bold" },
+        bodyStyles: { fontSize: 9, cellPadding: 4 },
+        margin: { left: 15, right: 15 },
+      });
+    }
+  }
+
+  // ── Footer on every page
+  const pageCount = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setDrawColor(201, 165, 76);
+    doc.setLineWidth(0.5);
+    doc.line(15, 282, 195, 282);
+    doc.setFontSize(8);
+    doc.setTextColor(107, 114, 128);
+    doc.setFont("helvetica", "normal");
+    doc.text("Generated by DealClarity — dealclarity.vercel.app", 15, 288);
+    doc.text("Profit Clarity Advantage | Because the books don't lie.", 15, 293);
+    doc.text(`Page ${i} of ${pageCount}`, 195, 288, { align: "right" });
+  }
+
+  const filename = `DealClarity-${name.replace(/[^a-z0-9]/gi, "-")}-Report.pdf`;
+  doc.save(filename);
+  setPdfMsg("PDF downloaded!");
+  setTimeout(() => setPdfMsg(""), 3000);
+};
   const IC = INPUTS[dealType], RC = RESULTS[dealType];
 
   return (
@@ -1296,23 +2076,86 @@ export default function DealClarity() {
         {page === "analyze" && (<>
           <div className="mb-6"><div className="flex flex-wrap gap-2 justify-center">{localDealTypes.map(dt => (<button key={dt.id} onClick={() => setDealType(dt.id)} className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium transition-all border" style={{ background: dealType === dt.id ? B.pri : B.card, color: dealType === dt.id ? "#fff" : B.txt, borderColor: dealType === dt.id ? B.pri : B.brd }}><dt.icon size={15} /><div className="text-left"><div className="font-semibold">{dt.label}</div><div className="text-xs opacity-70">{dt.desc}</div></div></button>))}</div></div>
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-            <div className="lg:col-span-2">{IC && <IC d={cd} u={uf} t={t} />}</div>
+            <div className="lg:col-span-2">
+  <TemplateSelector dealType={dealType} onLoad={(data) => setDealData(prev => ({ ...prev, [dealType]: data }))} />
+  {IC && <IC d={cd} u={uf} t={t} />}
+</div>
             <div className="lg:col-span-3 space-y-4">
               {RC && calc && <RC c={calc} t={t} />}
-              <button onClick={saveDeal} className="w-full py-3 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2" style={{ background: saved ? B.grn : B.pri, color: "#fff" }}>{saved ? <><Check size={16} /> {t.saved}</> : <><Plus size={16} /> {t.savePortfolio}</>}</button>
+              <button
+  onClick={saveDeal}
+  className="w-full py-3 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2"
+  style={{ background: saved ? B.grn : editingDeal ? B.gold : B.pri, color: editingDeal ? B.pri : "#fff" }}
+>
+  {saved ? (
+  <><Check size={16} /> {t.saved}</>
+) : editingDeal ? (
+  <><Check size={16} /> Update Deal</>
+) : (
+  <><Plus size={16} /> {t.savePortfolio}</>
+)}
+</button>
+{editingDeal && (
+  <button
+    onClick={() => setEditingDeal(null)}
+    className="w-full py-2 rounded-xl text-xs font-medium"
+    style={{ color: B.mut }}
+  >
+    Cancel Edit
+  </button>
+)}
               <button onClick={() => exportPDF()} className="w-full py-3 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 border-2" style={{ borderColor: B.gold, color: B.goldD, background: B.goldL }}><Download size={16} /> {t.exportPdf}</button>
-              {pdfMsg && <p className="text-xs text-center font-medium" style={{ color: B.grn }}>{t.pdfHint}</p>}
+              {pdfMsg && <p className="text-xs text-center font-medium" style={{ color: B.grn }}>{pdfMsg}</p>}
               <div className="rounded-xl p-5 border-2 border-dashed" style={{ borderColor: B.gold, background: B.goldL }}><div className="flex items-start gap-3"><Star size={20} style={{ color: B.goldD, flexShrink: 0, marginTop: 2 }} /><div><h3 className="font-bold text-sm mb-1" style={{ color: B.goldD }}>{t.goPro} — {t.proPrice}</h3><p className="text-xs mb-3" style={{ color: "#6B5A1E" }}>{t.proDesc}</p><button onClick={() => setShowPro(true)} className="px-4 py-2 rounded-lg text-xs font-semibold hover:opacity-90" style={{ background: B.pri, color: "#fff" }}>{t.startTrial} →</button></div></div></div>
             </div>
           </div>
         </>)}
-        {page === "portfolio" && <Portfolio deals={portfolio} removeDeal={removeDeal} exportPDF={exportPDF} t={t} getGradeL={getGradeL} localDealTypes={localDealTypes} />}
+        {page === "portfolio" && <Portfolio deals={portfolio} removeDeal={removeDeal} editDeal={editDeal} exportPDF={exportPDF} t={t} getGradeL={getGradeL} localDealTypes={localDealTypes} />}
         {page === "compare" && <Compare deals={portfolio} t={t} localDealTypes={localDealTypes} />}
-        {page === "splits" && <Splits t={t} />}
+        {page === "splits" && <Splits t={t} portfolio={portfolio} localDealTypes={localDealTypes} />}
         {page === "sensitivity" && (isPro ? <Sensitivity deals={portfolio} t={t} getGradeL={getGradeL} localDealTypes={localDealTypes} /> : <ProGate feature="Sensitivity Analysis" onUnlock={() => setShowPro(false)} setShowPro={setShowPro} t={t} />)}
+        {page === "budget" && <BudgetPlanner isPro={isPro} setShowPro={setShowPro} />}
         <footer className="text-center py-6 mt-8 border-t" style={{ borderColor: B.brd }}><p className="text-xs" style={{ color: B.mut }}>{t.footer}</p></footer>
       </main>
 
+      {showAuth && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.5)" }} onClick={() => setShowAuth(false)}>
+    <div className="rounded-2xl max-w-sm w-full overflow-hidden" style={{ background: B.card }} onClick={e => e.stopPropagation()}>
+      <div className="p-6" style={{ background: B.pri }}>
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-bold text-white">{authMode === "signup" ? "Create Account" : "Sign In"}</h2>
+          <button onClick={() => setShowAuth(false)} className="text-white hover:opacity-70">✕</button>
+        </div>
+      </div>
+      <div className="p-6 space-y-4">
+        <div>
+          <label className="text-xs font-semibold block mb-1" style={{ color: B.mut }}>Email</label>
+          <input type="email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} placeholder="you@email.com" className="w-full px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2" style={{ borderColor: B.brd }} />
+        </div>
+        <div>
+          <label className="text-xs font-semibold block mb-1" style={{ color: B.mut }}>Password</label>
+          <input type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} placeholder="••••••••" className="w-full px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2" style={{ borderColor: B.brd }} />
+        </div>
+        {authError && <p className="text-xs text-center font-medium" style={{ color: authError.includes("Check") ? B.grn : B.red }}>{authError}</p>}
+        <button onClick={handleAuth} disabled={authLoading} className="w-full py-3 rounded-xl font-bold text-sm hover:opacity-90 disabled:opacity-50" style={{ background: B.pri, color: "#fff" }}>
+          {authLoading ? "Please wait..." : authMode === "signup" ? "Create Account" : "Sign In"}
+        </button>
+        <p className="text-xs text-center" style={{ color: B.mut }}>
+          {authMode === "signup" ? "Already have an account? " : "No account yet? "}
+          <button onClick={() => { setAuthMode(authMode === "signup" ? "signin" : "signup"); setAuthError(""); }} className="font-semibold underline" style={{ color: B.blue }}>
+            {authMode === "signup" ? "Sign in" : "Create one"}
+          </button>
+        </p>
+        {user && (
+          <div className="pt-2 border-t text-center" style={{ borderColor: B.brd }}>
+            <p className="text-xs mb-2" style={{ color: B.mut }}>Signed in as {user.email}</p>
+            <button onClick={handleSignOut} className="text-xs underline" style={{ color: B.red }}>Sign out</button>
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+)}
       {showPro && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.5)" }} onClick={() => setShowPro(false)}><div className="rounded-2xl max-w-lg w-full overflow-hidden max-h-[90vh] overflow-y-auto" style={{ background: B.card }} onClick={e => e.stopPropagation()}>
         <div className="p-6" style={{ background: B.pri }}><div className="flex items-center justify-between"><div><h2 className="text-lg font-bold text-white">{t.proTitle || "Unlock DealClarity Pro"}</h2><p className="text-xs" style={{ color: "#A3B8D4" }}>{t.proSub || "Unlock all premium features"}</p></div><button onClick={() => setShowPro(false)} className="text-white text-xl hover:opacity-70">x</button></div></div>
         <div className="p-6">
@@ -1327,14 +2170,18 @@ export default function DealClarity() {
                 ))}
               </div>
               {/* Stripe Purchase Buttons */}
-              {hasStripe && (
-                <div className="space-y-2">
-                  {STRIPE.monthly && <a href={STRIPE.monthly} target="_blank" rel="noopener noreferrer" className="block w-full text-center py-3 rounded-xl font-bold text-sm transition-all hover:opacity-90" style={{ background: B.gold, color: B.pri }}>{t.trialMonthly || "Start Free Trial - $9/mo"}</a>}
-                  {STRIPE.annual && <a href={STRIPE.annual} target="_blank" rel="noopener noreferrer" className="block w-full text-center py-3 rounded-xl font-bold text-sm transition-all hover:opacity-90 border-2" style={{ borderColor: B.gold, color: B.gold }}>{t.trialAnnual || "Annual Plan - $79/yr (save 27%)"}</a>}
-                  {STRIPE.lifetime && <a href={STRIPE.lifetime} target="_blank" rel="noopener noreferrer" className="block w-full text-center py-3 rounded-xl font-bold text-sm transition-all hover:opacity-90 border-2" style={{ borderColor: B.accL, color: B.accL }}>{t.trialLifetime || "Lifetime Access - $199"}</a>}
-                  <p className="text-xs text-center" style={{ color: B.mut }}>{t.secureCheckout || "Secure checkout via Stripe. Cancel anytime."}</p>
-                </div>
-              )}
+              <div className="space-y-2">
+  {!user && (
+    <div className="rounded-xl p-3 mb-3 text-center" style={{ background: B.blueL }}>
+      <p className="text-xs mb-2 font-medium" style={{ color: B.blue }}>Sign in to purchase and sync your Pro status across devices</p>
+      <button onClick={() => { setShowPro(false); setShowAuth(true); }} className="px-4 py-2 rounded-lg text-xs font-semibold hover:opacity-90" style={{ background: B.blue, color: "#fff" }}>Sign In / Create Account</button>
+    </div>
+  )}
+  <button onClick={() => handleCheckout("monthly")} className="block w-full text-center py-3 rounded-xl font-bold text-sm transition-all hover:opacity-90" style={{ background: B.gold, color: B.pri }}>Monthly Plan — $29/mo</button>
+  <button onClick={() => handleCheckout("annual")} className="block w-full text-center py-3 rounded-xl font-bold text-sm transition-all hover:opacity-90 border-2" style={{ borderColor: B.gold, color: B.gold }}>Annual Plan — $199/yr (save 43%)</button>
+  <button onClick={() => handleCheckout("lifetime")} className="block w-full text-center py-3 rounded-xl font-bold text-sm transition-all hover:opacity-90 border-2" style={{ borderColor: B.accL, color: B.accL }}>Lifetime Access — $299 once</button>
+  <p className="text-xs text-center" style={{ color: B.mut }}>Secure checkout via Stripe. Cancel anytime.</p>
+</div>
               {/* Code Activation */}
               <div style={{ borderTop: `1px solid ${B.brd}`, paddingTop: 16 }}>
                 <h3 className="font-bold mb-2 text-sm" style={{ color: B.txt }}>{t.haveCode || "Have a Pro code?"}</h3>

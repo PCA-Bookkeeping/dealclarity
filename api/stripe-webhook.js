@@ -26,26 +26,55 @@ export default async function handler(req, res) {
   try {
     event = stripe.webhooks.constructEvent(rawBody, sig, process.env.STRIPE_WEBHOOK_SECRET);
   } catch (err) {
+    console.error("Webhook signature verification failed:", err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
+
   if (event.type === "checkout.session.completed") {
     const session = event.data.object;
     const customerEmail = session.customer_details?.email;
-    const priceId = session.line_items?.data?.[0]?.price?.id;
-    const isLifetime = priceId === process.env.STRIPE_LIFETIME_PRICE_ID;
-    const isAnnual = priceId === process.env.STRIPE_ANNUAL_PRICE_ID;
-    const proType = isLifetime ? "lifetime" : isAnnual ? "annual" : "monthly";
-    if (customerEmail) {
-      const { data: userData } = await supabase.auth.admin.listUsers();
+
+    if (!customerEmail) {
+      console.error("Webhook: No customer email found in session", session.id);
+      return res.json({ received: true, warning: "no_email" });
+    }
+
+    try {
+      // Retrieve the session with line_items expanded (they're not included by default)
+      const fullSession = await stripe.checkout.sessions.retrieve(session.id, {
+        expand: ["line_items.data.price"],
+      });
+      const priceId = fullSession.line_items?.data?.[0]?.price?.id;
+      const isLifetime = priceId === process.env.STRIPE_LIFETIME_PRICE_ID;
+      const isAnnual = priceId === process.env.STRIPE_ANNUAL_PRICE_ID;
+      const proType = isLifetime ? "lifetime" : isAnnual ? "annual" : "monthly";
+
+      const { data: userData, error: listError } = await supabase.auth.admin.listUsers();
+      if (listError) {
+        console.error("Webhook: Failed to list users:", listError.message);
+        return res.status(500).json({ error: "Failed to look up user" });
+      }
+
       const user = userData?.users?.find(u => u.email === customerEmail);
       if (user) {
-        await supabase.from("profiles").update({
+        const { error: updateError } = await supabase.from("profiles").update({
           is_pro: true,
           pro_type: proType,
-          stripe_customer_id: session.customer
+          stripe_customer_id: session.customer,
         }).eq("id", user.id);
+
+        if (updateError) {
+          console.error("Webhook: Failed to update profile:", updateError.message);
+          return res.status(500).json({ error: "Failed to update profile" });
+        }
+      } else {
+        console.error("Webhook: No user found for email:", customerEmail);
       }
+    } catch (err) {
+      console.error("Webhook processing error:", err.message);
+      return res.status(500).json({ error: "Webhook processing failed" });
     }
   }
+
   res.json({ received: true });
 }

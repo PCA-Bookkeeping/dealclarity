@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, Component } from "react";
 import { supabase } from "./supabase";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend,
@@ -13,6 +13,7 @@ import {
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import BudgetPlanner from "./BudgetPlanner";
+import { trackEvent, EVENTS } from "./utils/analytics";
 
 // ═══════════════════════════════════════════════════════════════
 // CONSTANTS & BRAND
@@ -30,7 +31,67 @@ const fmtK = (n) => n == null || isNaN(n) ? "$0" : Math.abs(n) >= 1000 ? `$${(n/
 const fp = (n) => n == null || isNaN(n) ? "0%" : `${n.toFixed(1)}%`;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-const PRO_CODE = "DEALCLARITYPRO2026";
+// PRO_CODE moved to server-side (api/activate-pro.js) — no secrets in client code
+
+// ═══════════════════════════════════════════════════════════════
+// ERROR BOUNDARY
+// ═══════════════════════════════════════════════════════════════
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, info) {
+    console.error("DealClarity Error:", error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: B.bg, padding: 32 }}>
+          <div style={{ maxWidth: 480, textAlign: "center", background: B.card, borderRadius: 16, padding: 40, boxShadow: "0 4px 24px rgba(0,0,0,0.08)" }}>
+            <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
+            <h2 style={{ color: B.pri, fontSize: 22, fontWeight: 700, marginBottom: 8 }}>Something went wrong</h2>
+            <p style={{ color: B.mut, fontSize: 14, marginBottom: 24 }}>DealClarity ran into an issue. Your data is safe — try refreshing the page.</p>
+            <button onClick={() => window.location.reload()} style={{ background: B.gold, color: B.pri, border: "none", padding: "12px 32px", borderRadius: 12, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+              Refresh Page
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TOAST NOTIFICATION (replaces alert())
+// ═══════════════════════════════════════════════════════════════
+function Toast({ message, type = "error", onClose }) {
+  useEffect(() => {
+    const timer = setTimeout(onClose, 5000);
+    return () => clearTimeout(timer);
+  }, [onClose]);
+  const bg = type === "error" ? B.redL : type === "success" ? B.grnL : B.blueL;
+  const color = type === "error" ? B.red : type === "success" ? B.grn : B.blue;
+  const icon = type === "error" ? "⚠️" : type === "success" ? "✅" : "ℹ️";
+  return (
+    <div style={{ position: "fixed", top: 20, right: 20, zIndex: 10000, background: bg, border: `1px solid ${color}`, borderRadius: 12, padding: "12px 20px", maxWidth: 400, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 32px rgba(0,0,0,0.12)", animation: "slideIn 0.3s ease" }}>
+      <span style={{ fontSize: 18 }}>{icon}</span>
+      <span style={{ color, fontSize: 13, fontWeight: 500, flex: 1 }}>{message}</span>
+      <button onClick={onClose} style={{ background: "none", border: "none", color, cursor: "pointer", fontSize: 16, padding: 0 }}>✕</button>
+    </div>
+  );
+}
+
+// Input sanitizer — prevents negative values on financial fields
+const sanitizeNum = (v, allowNeg = false) => {
+  const n = parseFloat(v);
+  if (isNaN(n)) return 0;
+  return allowNeg ? n : Math.max(0, n);
+};
 
 // ═══════════════════════════════════════════════════════════════
 // TRANSLATIONS (EN / ES)
@@ -336,14 +397,15 @@ const getGrade = (score) => GRADES.find(g => score >= g.min) || GRADES[GRADES.le
 // ═══════════════════════════════════════════════════════════════
 // SHARED UI COMPONENTS
 // ═══════════════════════════════════════════════════════════════
-const Input = ({ label, value, onChange, pre = "$", suf, tip, sm, text }) => (
+const Input = ({ label, value, onChange, pre = "$", suf, tip, sm, text, min, allowNeg }) => (
   <div className={sm ? "flex-1 min-w-0" : "w-full"}>
     <label className="block text-xs font-medium mb-1" style={{ color: B.mut }}>
       {label}{tip && <span className="ml-1 cursor-help" title={tip}>ℹ️</span>}
     </label>
     <div className="flex items-center rounded-lg border overflow-hidden" style={{ borderColor: B.brd, background: "#fff" }}>
       {pre && !text && <span className="px-2 text-sm font-medium" style={{ color: B.mut, background: "#F9FAFB", borderRight: `1px solid ${B.brd}`, padding: "8px 10px" }}>{pre}</span>}
-      <input type={text ? "text" : "number"} value={value} onChange={e => text ? onChange(e.target.value) : onChange(Number(e.target.value) || 0)}
+      <input type={text ? "text" : "number"} value={value} min={min ?? (allowNeg ? undefined : 0)}
+        onChange={e => text ? onChange(e.target.value) : onChange(sanitizeNum(e.target.value, allowNeg))}
         placeholder={text ? "e.g. 123 Main St Flip" : ""} className="w-full px-3 py-2 text-sm outline-none" style={{ color: B.txt }} />
       {suf && <span className="px-2 text-xs whitespace-nowrap" style={{ color: B.mut, background: "#F9FAFB", borderLeft: `1px solid ${B.brd}`, padding: "8px 10px" }}>{suf}</span>}
     </div>
@@ -1745,7 +1807,7 @@ export default function DealClarity() {
   const localPages = useMemo(() => getPages(t), [lang]);
   const localGrades = useMemo(() => getGrades(t), [lang]);
   const getGradeL = (score) => localGrades.find(g => score >= g.min) || localGrades[localGrades.length - 1];
-  const toggleLang = () => { const n = lang === "en" ? "es" : "en"; setLang(n); try { localStorage.setItem("dc_lang", n); } catch {} };
+  const toggleLang = () => { const n = lang === "en" ? "es" : "en"; setLang(n); try { localStorage.setItem("dc_lang", n); } catch {} trackEvent(EVENTS.LANGUAGE_TOGGLED, { lang: n }); };
   const [dealData, setDealData] = useState(() => { const d = {}; DEAL_TYPES.forEach(dt => { d[dt.id] = { ...DEFAULTS[dt.id] }; }); return d; });
   const [portfolio, setPortfolio] = useState(() => {
     try { const s = localStorage.getItem("dc_portfolio"); return s ? JSON.parse(s) : []; } catch { return []; }
@@ -1757,7 +1819,7 @@ export default function DealClarity() {
   const [email, setEmail] = useState("");
   const [emailDone, setEmailDone] = useState(false);
   const [pdfMsg, setPdfMsg] = useState("");
-  const [isPro, setIsPro] = useState(() => { try { return localStorage.getItem("dc_pro") === "true"; } catch { return false; } });
+  const [isPro, setIsPro] = useState(false); // Always starts false — verified from Supabase via onAuthStateChange
   const [user, setUser] = useState(null);
 const [showAuth, setShowAuth] = useState(false);
 const [authEmail, setAuthEmail] = useState("");
@@ -1765,6 +1827,8 @@ const [authPassword, setAuthPassword] = useState("");
 const [authMode, setAuthMode] = useState("signin");
 const [authError, setAuthError] = useState("");
 const [authLoading, setAuthLoading] = useState(false);
+  const [toast, setToast] = useState(null); // { message, type }
+  const showToast = useCallback((message, type = "error") => setToast({ message, type }), []);
   const [proCode, setProCode] = useState("");
   const [proMsg, setProMsg] = useState("");
 
@@ -1773,13 +1837,87 @@ const [authLoading, setAuthLoading] = useState(false);
     try { localStorage.setItem("dc_portfolio", JSON.stringify(p)); } catch {}
   }, []);
 
+  // ── Auth state listener: auto-detect login/logout across tabs ──
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === "SIGNED_IN" && session?.user) {
+        setUser(session.user);
+        const { data: profile } = await supabase.from("profiles").select("is_pro, pro_type").eq("id", session.user.id).single();
+        if (profile?.is_pro) {
+          setIsPro(true);
+          try { localStorage.setItem("dc_pro", "true"); } catch {}
+        }
+      } else if (event === "SIGNED_OUT") {
+        setUser(null);
+        setIsPro(false);
+        setPortfolio([]);
+        try { localStorage.removeItem("dc_portfolio"); localStorage.removeItem("dc_pro"); } catch {}
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // ── Check ?upgraded=true after Stripe redirect ──
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("upgraded") === "true") {
+      // Clean URL
+      window.history.replaceState({}, "", window.location.pathname);
+      // Refresh Pro status from Supabase
+      (async () => {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          const { data: profile } = await supabase.from("profiles").select("is_pro, pro_type").eq("id", session.user.id).single();
+          if (profile?.is_pro) {
+            setIsPro(true);
+            try { localStorage.setItem("dc_pro", "true"); } catch {}
+            showToast("Pro activated! Welcome to DealClarity Pro.", "success");
+          }
+        }
+      })();
+    }
+  }, [showToast]);
+
+  // ── Refresh Pro status on window focus (e.g., returning from Stripe) ──
+  useEffect(() => {
+    const handleFocus = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        setUser(session.user);
+        const { data: profile } = await supabase.from("profiles").select("is_pro, pro_type").eq("id", session.user.id).single();
+        if (profile?.is_pro && !isPro) {
+          setIsPro(true);
+          try { localStorage.setItem("dc_pro", "true"); } catch {}
+          showToast("Pro status synced!", "success");
+        }
+      }
+    };
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [isPro, showToast]);
+
   const activatePro = async (code) => {
-  if (code === PRO_CODE) {
-    setIsPro(true);
-    setProMsg("Pro activated! Full access unlocked.");
-    setTimeout(() => { setProMsg(""); setShowPro(false); }, 2000);
-  } else {
-    setProMsg("Invalid code. Please check and try again.");
+  if (!user) { setProMsg("Please sign in first to activate a code."); setTimeout(() => setProMsg(""), 3000); return; }
+  setProMsg("Validating...");
+  try {
+    const res = await fetch("/api/activate-pro", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, email: user.email }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      setIsPro(true);
+      try { localStorage.setItem("dc_pro", "true"); } catch {}
+      setProMsg("Pro activated! Full access unlocked.");
+      trackEvent(EVENTS.PRO_ACTIVATED, { method: "code" });
+      setTimeout(() => { setProMsg(""); setShowPro(false); }, 2000);
+    } else {
+      setProMsg(data.error || "Invalid code. Please check and try again.");
+      setTimeout(() => setProMsg(""), 3000);
+    }
+  } catch {
+    setProMsg("Connection error. Please try again.");
     setTimeout(() => setProMsg(""), 3000);
   }
 };
@@ -1791,9 +1929,11 @@ const handleAuth = async () => {
       const { error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
       if (error) throw error;
       setAuthError("Check your email to confirm your account.");
+      trackEvent(EVENTS.AUTH_SIGNUP);
     } else {
       const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
       if (error) throw error;
+      trackEvent(EVENTS.AUTH_SIGNIN);
       const { data: profile } = await supabase.from("profiles").select("is_pro, pro_type").eq("id", data.user.id).single();
       setUser(data.user);
       setIsPro(profile?.is_pro || false);
@@ -1805,7 +1945,7 @@ const handleAuth = async () => {
 
 const handleSignOut = async () => {
   await supabase.auth.signOut();
-  setUser(null); setIsPro(false); setSavedDeals([]);
+  setUser(null); setIsPro(false); setPortfolio([]); try { localStorage.removeItem("dc_portfolio"); localStorage.removeItem("dc_pro"); } catch {}
 };
 
   const cd = dealData[dealType];
@@ -1836,14 +1976,15 @@ const handleSignOut = async () => {
     setTimeout(() => setSaved(false), 2000);
     return;
   }
-  if (!isPro && portfolio.length >= 2) { setShowPro(true); return; }
+  if (!isPro && portfolio.length >= 2) { setShowPro(true); trackEvent(EVENTS.PRO_MODAL_OPENED, { trigger: "save_limit" }); return; }
   const next = [...portfolio, { id: uid(), type: dealType, data: { ...cd }, calc }];
   setPortfolio(next);
   saveToStorage(next);
   setSaved(true);
+  trackEvent(EVENTS.DEAL_SAVED, { dealType, portfolioSize: next.length });
   setTimeout(() => setSaved(false), 2000);
 };
-  const removeDeal = (id) => { const next = portfolio.filter(d => d.id !== id); setPortfolio(next); saveToStorage(next); };
+  const removeDeal = (id) => { const next = portfolio.filter(d => d.id !== id); setPortfolio(next); saveToStorage(next); trackEvent(EVENTS.DEAL_REMOVED); };
   const editDeal = (deal) => {
   setDealType(deal.type);
   setDealData(prev => ({ ...prev, [deal.type]: { ...deal.data } }));
@@ -1855,6 +1996,7 @@ const handleSignOut = async () => {
   // PDF export
   const handleCheckout = async (plan) => {
   if (!user) { setShowAuth(true); return; }
+  trackEvent(EVENTS.CHECKOUT_STARTED, { plan });
   try {
     const res = await fetch("/api/create-checkout", {
       method: "POST",
@@ -1862,21 +2004,15 @@ const handleSignOut = async () => {
       body: JSON.stringify({ plan, email: user.email }),
     });
     const data = await res.json();
-    if (data.error) { alert(data.error); return; }
+    if (data.error) { showToast(data.error); return; }
     if (data.url) window.location.href = data.url;
   } catch (e) {
-    alert("Checkout error. Please check your connection and try again.");
+    showToast("Checkout error. Please check your connection and try again.");
   }
 };
   const exportPDF = (deal) => {
-  if (!isPro) { setShowPro(true); return; }
-const editDeal = (deal) => {
-  setDealType(deal.type);
-  setDealData(prev => ({ ...prev, [deal.type]: { ...deal.data } }));
-  setEditingDeal(deal.id);
-  setPage("analyze");
-  window.scrollTo({ top: 0, behavior: "smooth" });
-};
+  if (!isPro) { setShowPro(true); trackEvent(EVENTS.PRO_MODAL_OPENED, { trigger: "pdf_export" }); return; }
+  trackEvent(EVENTS.PDF_EXPORTED, { dealType: deal?.type || dealType });
   const dealObj = deal || { type: dealType, data: { ...cd }, calc };
   const tDeal = DEAL_TYPES.find(dt => dt.id === dealObj.type);
   const c = dealObj.calc;
@@ -2053,7 +2189,10 @@ const editDeal = (deal) => {
   const IC = INPUTS[dealType], RC = RESULTS[dealType];
 
   return (
+    <ErrorBoundary>
     <div style={{ background: B.bg, minHeight: "100vh", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+      <style>{`@keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }`}</style>
       <header style={{ background: B.pri, borderBottom: `3px solid ${B.gold}` }}>
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -2203,5 +2342,6 @@ const editDeal = (deal) => {
         </div>
       </div></div>)}
     </div>
+    </ErrorBoundary>
   );
 }
