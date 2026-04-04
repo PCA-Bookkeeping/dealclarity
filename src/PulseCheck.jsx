@@ -52,6 +52,18 @@ const KPI = ({ icon: I, label, value, sub, color, bg }) => (
   </div>
 );
 
+// ── Input must be defined OUTSIDE PulseCheck to avoid remount on every keystroke
+const PulseInput = ({ label, value, onChange, type = "text", pre, placeholder }) => (
+  <div className="flex-1 min-w-0">
+    <label className="block text-xs font-medium mb-1" style={{ color: B.mut }}>{label}</label>
+    <div className="flex items-center rounded-lg border overflow-hidden" style={{ borderColor: B.brd }}>
+      {pre && <span className="px-2 text-xs font-medium" style={{ color: B.mut, background: "#F9FAFB" }}>{pre}</span>}
+      <input type={type} value={value} onChange={onChange} placeholder={placeholder}
+        className="w-full px-2 py-1.5 text-sm outline-none" style={{ color: B.txt }} />
+    </div>
+  </div>
+);
+
 export default function PulseCheck({ isPro, setShowPro }) {
   // ── State
   const [snapshots, setSnapshots] = useState(() => {
@@ -141,17 +153,6 @@ export default function PulseCheck({ isPro, setShowPro }) {
     );
   }
 
-  const Input = ({ label, value, onChange, type = "text", pre, placeholder }) => (
-    <div className="flex-1 min-w-0">
-      <label className="block text-xs font-medium mb-1" style={{ color: B.mut }}>{label}</label>
-      <div className="flex items-center rounded-lg border overflow-hidden" style={{ borderColor: B.brd }}>
-        {pre && <span className="px-2 text-xs font-medium" style={{ color: B.mut, background: "#F9FAFB" }}>{pre}</span>}
-        <input type={type} value={value} onChange={onChange} placeholder={placeholder}
-          className="w-full px-2 py-1.5 text-sm outline-none" style={{ color: B.txt }} />
-      </div>
-    </div>
-  );
-
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -178,22 +179,22 @@ export default function PulseCheck({ isPro, setShowPro }) {
           <div className="p-4 space-y-4">
             {/* Business info */}
             <div className="flex flex-wrap gap-3">
-              <Input label="Period (e.g. Jan-Dec 2026)" value={form.period} onChange={e => updateForm("period", e.target.value)} placeholder="Q1 2026" />
-              <Input label="Business Type" value={form.businessType} onChange={e => updateForm("businessType", e.target.value)} placeholder="Flips & Rentals" />
-              <Input label="Active Projects" value={form.activeProjects} onChange={e => updateForm("activeProjects", e.target.value)} type="number" pre="#" />
+              <PulseInput label="Period (e.g. Jan-Dec 2026)" value={form.period} onChange={e => updateForm("period", e.target.value)} placeholder="Q1 2026" />
+              <PulseInput label="Business Type" value={form.businessType} onChange={e => updateForm("businessType", e.target.value)} placeholder="Flips & Rentals" />
+              <PulseInput label="Active Projects" value={form.activeProjects} onChange={e => updateForm("activeProjects", e.target.value)} type="number" pre="#" />
             </div>
 
             {/* Core 5 numbers */}
             <div>
               <p className="text-xs font-bold mb-2" style={{ color: B.pri }}>THE 5 NUMBERS</p>
               <div className="flex flex-wrap gap-3">
-                <Input label="1. Revenue (last 12 months)" value={form.revenue} onChange={e => updateForm("revenue", e.target.value)} type="number" pre="$" />
-                <Input label="2. Operating Expenses" value={form.opex} onChange={e => updateForm("opex", e.target.value)} type="number" pre="$" />
-                <Input label="3. Cash Position" value={form.cash} onChange={e => updateForm("cash", e.target.value)} type="number" pre="$" />
+                <PulseInput label="1. Revenue (last 12 months)" value={form.revenue} onChange={e => updateForm("revenue", e.target.value)} type="number" pre="$" />
+                <PulseInput label="2. Operating Expenses" value={form.opex} onChange={e => updateForm("opex", e.target.value)} type="number" pre="$" />
+                <PulseInput label="3. Cash Position" value={form.cash} onChange={e => updateForm("cash", e.target.value)} type="number" pre="$" />
               </div>
               <div className="flex flex-wrap gap-3 mt-3">
-                <Input label="4. Avg Profit per Project" value={form.profitPerProject} onChange={e => updateForm("profitPerProject", e.target.value)} type="number" pre="$" />
-                <Input label="5. Owner Cash Paid Out (12mo)" value={form.ownerPay} onChange={e => updateForm("ownerPay", e.target.value)} type="number" pre="$" />
+                <PulseInput label="4. Avg Profit per Project" value={form.profitPerProject} onChange={e => updateForm("profitPerProject", e.target.value)} type="number" pre="$" />
+                <PulseInput label="5. Owner Cash Paid Out (12mo)" value={form.ownerPay} onChange={e => updateForm("ownerPay", e.target.value)} type="number" pre="$" />
               </div>
             </div>
 
@@ -202,8 +203,8 @@ export default function PulseCheck({ isPro, setShowPro }) {
               <p className="text-xs font-bold mb-2" style={{ color: B.pri }}>REVENUE BY PROJECT (optional)</p>
               {form.projects.map((pr, i) => (
                 <div key={pr.id} className="flex gap-2 mb-2 items-end">
-                  <Input label={i === 0 ? "Project Name" : ""} value={pr.name} onChange={e => updateProject(pr.id, "name", e.target.value)} placeholder="123 Main St flip" />
-                  <Input label={i === 0 ? "Revenue" : ""} value={pr.revenue} onChange={e => updateProject(pr.id, "revenue", e.target.value)} type="number" pre="$" />
+                  <PulseInput label={i === 0 ? "Project Name" : ""} value={pr.name} onChange={e => updateProject(pr.id, "name", e.target.value)} placeholder="123 Main St flip" />
+                  <PulseInput label={i === 0 ? "Revenue" : ""} value={pr.revenue} onChange={e => updateProject(pr.id, "revenue", e.target.value)} type="number" pre="$" />
                   {form.projects.length > 1 && (
                     <button onClick={() => removeProject(pr.id)} className="p-1.5 rounded hover:bg-red-50 mb-0.5">
                       <Trash2 size={13} style={{ color: B.red }} />

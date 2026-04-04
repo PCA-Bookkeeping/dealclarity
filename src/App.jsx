@@ -1852,7 +1852,7 @@ const [authLoading, setAuthLoading] = useState(false);
   // ── Auth state listener: auto-detect login/logout, sync deals from cloud ──
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === "SIGNED_IN" && session?.user) {
+      if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session?.user) {
         setUser(session.user);
         const { data: profile } = await supabase.from("profiles").select("is_pro, pro_type, trial_ends_at").eq("id", session.user.id).single();
         if (profile?.is_pro) {

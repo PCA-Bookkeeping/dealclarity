@@ -13,7 +13,7 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
 
   try {
-    const body = JSON.parse(req.body);
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
     // Support both { plan, email } (new) and { priceId, email } (legacy)
     const email = body.email;
     const priceId = body.priceId || PLAN_TO_PRICE[body.plan];

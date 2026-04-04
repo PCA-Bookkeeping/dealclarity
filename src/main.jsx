@@ -12,15 +12,3 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   </React.StrictMode>,
 )
 
-useEffect(() => {
-  supabase.auth.onAuthStateChange((event, session) => {
-    if (event === "SIGNED_IN" && session) {
-      setUser(session.user);
-      setShowAuth(false);
-    }
-    if (event === "SIGNED_OUT") {
-      setUser(null);
-      setIsPro(false);
-    }
-  });
-}, []);
