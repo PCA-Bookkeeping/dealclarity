@@ -1231,59 +1231,411 @@ const Compare = ({ deals, t, localDealTypes }) => {
 };
 
 // ═══════════════════════════════════════════════════════════════
-// PAGE: SPLITS
+// PAGE: SPLITS (UPGRADED - multi-partner, saved deal linking, pie chart)
 // ═══════════════════════════════════════════════════════════════
-const Splits = ({ t }) => {
-  const [d, setD] = useState({ totalProfit: 100000, p1Name: "You", p2Name: "Partner", p1Cash: 70, p2Cash: 30, p1Work: 80, p2Work: 20, cashWeight: 50 });
-  const u = (k, v) => setD(p => ({ ...p, [k]: v }));
-  const ww = 100 - d.cashWeight;
-  const p1S = (d.p1Cash * d.cashWeight / 100) + (d.p1Work * ww / 100);
-  const p2S = (d.p2Cash * d.cashWeight / 100) + (d.p2Work * ww / 100);
-  const tot = p1S + p2S; const p1P = tot > 0 ? (p1S / tot) * 100 : 50; const p2P = 100 - p1P;
-  const p1A = d.totalProfit * (p1P / 100), p2A = d.totalProfit * (p2P / 100);
-  return (<div className="space-y-6">
-    <Sec title={t.dealDetails} icon={Users}><div className="space-y-3">
-      <Input label={t.totalProfit} value={d.totalProfit} onChange={v => u("totalProfit", v)} />
-      <div className="flex gap-3"><Input sm label={t.partner1} value={d.p1Name} onChange={v => u("p1Name", v)} pre="" text /><Input sm label={t.partner2} value={d.p2Name} onChange={v => u("p2Name", v)} pre="" text /></div>
-    </div></Sec>
-    <Sec title={t.capitalPct} icon={DollarSign}><div className="flex gap-3"><Input sm label={d.p1Name} value={d.p1Cash} onChange={v => u("p1Cash", v)} pre="" suf="%" /><Input sm label={d.p2Name} value={d.p2Cash} onChange={v => u("p2Cash", v)} pre="" suf="%" /></div></Sec>
-    <Sec title={t.workEquity} icon={Zap}><div className="flex gap-3"><Input sm label={d.p1Name} value={d.p1Work} onChange={v => u("p1Work", v)} pre="" suf="%" /><Input sm label={d.p2Name} value={d.p2Work} onChange={v => u("p2Work", v)} pre="" suf="%" /></div></Sec>
-    <Sec title={t.weighting} icon={Target}><Input label={t.cashWeight} value={d.cashWeight} onChange={v => u("cashWeight", v)} pre="" suf="%" tip="Higher = capital matters more" /><div className="text-xs mt-2" style={{ color: B.mut }}>{t.workWeight}: {ww}%</div></Sec>
-    <div className="grid grid-cols-2 gap-4">
-      <div className="rounded-xl p-5 text-center border-2" style={{ borderColor: B.pri, background: B.grnL }}><div className="text-xs font-medium mb-1" style={{ color: B.mut }}>{d.p1Name}</div><div className="text-3xl font-black" style={{ color: B.pri }}>{fp(p1P)}</div><div className="text-lg font-bold" style={{ color: B.grn }}>{fmt(p1A)}</div></div>
-      <div className="rounded-xl p-5 text-center border-2" style={{ borderColor: B.gold, background: B.goldL }}><div className="text-xs font-medium mb-1" style={{ color: B.mut }}>{d.p2Name}</div><div className="text-3xl font-black" style={{ color: B.goldD }}>{fp(p2P)}</div><div className="text-lg font-bold" style={{ color: B.goldD }}>{fmt(p2A)}</div></div>
+const SPLIT_COLORS = [B.pri, B.gold, B.blue, B.purple, B.grn];
+const SPLIT_BGS = [B.grnL, B.goldL, B.blueL, "#EDE9FE", B.grnL];
+
+const Splits = ({ t, portfolio = [], localDealTypes = [] }) => {
+  const [linkedDeal, setLinkedDeal] = useState("");
+  const [partners, setPartners] = useState([
+    { name: "You", cashPct: 70, workPct: 80 },
+    { name: "Partner", cashPct: 30, workPct: 20 },
+  ]);
+  const [totalProfit, setTotalProfit] = useState(100000);
+  const [cashWeight, setCashWeight] = useState(50);
+  const [splitType, setSplitType] = useState("weighted");
+
+  // Link to saved deal: auto-populate profit
+  const linkDeal = (dealId) => {
+    setLinkedDeal(dealId);
+    if (dealId) {
+      const deal = portfolio.find(d => d.id === dealId);
+      if (deal?.calc) {
+        const p = deal.calc.profit || deal.calc.annCF || (deal.calc.moCF || 0) * 12;
+        setTotalProfit(Math.round(p));
+      }
+    }
+  };
+
+  const addPartner = () => {
+    if (partners.length >= 5) return;
+    setPartners([...partners, { name: `Partner ${partners.length}`, cashPct: 0, workPct: 0 }]);
+  };
+  const removePartner = (i) => {
+    if (partners.length <= 2) return;
+    setPartners(partners.filter((_, idx) => idx !== i));
+  };
+  const updatePartner = (i, key, val) => {
+    const next = [...partners];
+    next[i] = { ...next[i], [key]: val };
+    setPartners(next);
+  };
+
+  // Calculate splits
+  const workWeight = 100 - cashWeight;
+  const results = partners.map(p => {
+    if (splitType === "equal") return { ...p, share: 100 / partners.length };
+    if (splitType === "capital") return { ...p, share: p.cashPct };
+    // weighted (default)
+    return { ...p, score: (p.cashPct * cashWeight / 100) + (p.workPct * workWeight / 100) };
+  });
+
+  if (splitType === "weighted") {
+    const totalScore = results.reduce((s, r) => s + (r.score || 0), 0);
+    results.forEach(r => { r.share = totalScore > 0 ? ((r.score || 0) / totalScore) * 100 : 100 / partners.length; });
+  }
+
+  results.forEach(r => { r.amount = totalProfit * (r.share / 100); });
+  const totalCash = partners.reduce((s, p) => s + p.cashPct, 0);
+  const totalWork = partners.reduce((s, p) => s + p.workPct, 0);
+  const pieData = results.map((r, i) => ({ name: r.name, value: Math.round(r.share * 100) / 100 }));
+
+  return (
+    <div className="space-y-6">
+      {/* Deal linking */}
+      {portfolio.length > 0 && (
+        <div className="rounded-xl p-4 flex items-center gap-3 flex-wrap" style={{ background: B.blueL, border: `1px solid ${B.blue}30` }}>
+          <FileText size={16} style={{ color: B.blue, flexShrink: 0 }} />
+          <div className="flex-1 min-w-[200px]">
+            <label className="text-xs font-medium block mb-1" style={{ color: B.blue }}>Link to a saved deal (auto-fill profit)</label>
+            <select value={linkedDeal} onChange={e => linkDeal(e.target.value)} className="w-full p-2 rounded-lg border text-sm" style={{ borderColor: B.brd }}>
+              <option value="">Manual entry</option>
+              {portfolio.map(d => <option key={d.id} value={d.id}>{d.data.name || localDealTypes.find(dt => dt.id === d.type)?.label || "Deal"} - {fmt(d.calc?.profit || d.calc?.annCF || 0)}</option>)}
+            </select>
+          </div>
+        </div>
+      )}
+
+      {/* Deal details */}
+      <Sec title={t.dealDetails} icon={Users}>
+        <div className="space-y-3">
+          <Input label={t.totalProfit} value={totalProfit} onChange={v => setTotalProfit(v)} />
+          <div>
+            <label className="text-xs font-medium block mb-1" style={{ color: B.mut }}>Split Method</label>
+            <div className="flex gap-2">
+              {[["weighted", "Weighted"], ["equal", "Equal"], ["capital", "Capital Only"]].map(([k, l]) => (
+                <button key={k} onClick={() => setSplitType(k)} className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all" style={{ background: splitType === k ? B.pri : "transparent", color: splitType === k ? "#fff" : B.mut, border: `1px solid ${splitType === k ? B.pri : B.brd}` }}>{l}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </Sec>
+
+      {/* Partners */}
+      <Sec title="Partners" icon={Users}>
+        <div className="space-y-4">
+          {partners.map((p, i) => (
+            <div key={i} className="rounded-xl p-4 border" style={{ borderColor: SPLIT_COLORS[i % 5] + "40", background: SPLIT_BGS[i % 5] + "60" }}>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full" style={{ background: SPLIT_COLORS[i % 5] }} />
+                  <input type="text" value={p.name} onChange={e => updatePartner(i, "name", e.target.value)} className="bg-transparent text-sm font-bold outline-none border-b border-transparent focus:border-current" style={{ color: SPLIT_COLORS[i % 5], maxWidth: 140 }} />
+                </div>
+                {partners.length > 2 && <button onClick={() => removePartner(i)} className="text-xs px-2 py-1 rounded hover:opacity-70" style={{ color: B.red }}><Trash2 size={14} /></button>}
+              </div>
+              {splitType !== "equal" && (
+                <div className="flex gap-3">
+                  <div className="flex-1"><label className="text-[10px] font-medium block mb-1" style={{ color: B.mut }}>Capital %</label><input type="number" value={p.cashPct} onChange={e => updatePartner(i, "cashPct", Number(e.target.value))} className="w-full p-2 rounded-lg border text-sm text-center" style={{ borderColor: B.brd }} /></div>
+                  {splitType === "weighted" && <div className="flex-1"><label className="text-[10px] font-medium block mb-1" style={{ color: B.mut }}>Work/Sweat Equity %</label><input type="number" value={p.workPct} onChange={e => updatePartner(i, "workPct", Number(e.target.value))} className="w-full p-2 rounded-lg border text-sm text-center" style={{ borderColor: B.brd }} /></div>}
+                </div>
+              )}
+            </div>
+          ))}
+          {partners.length < 5 && (
+            <button onClick={addPartner} className="w-full py-2.5 rounded-xl text-xs font-medium border-2 border-dashed flex items-center justify-center gap-1 transition-all hover:opacity-70" style={{ borderColor: B.brd, color: B.mut }}>
+              <Plus size={14} /> Add Partner (up to 5)
+            </button>
+          )}
+        </div>
+      </Sec>
+
+      {/* Weighting slider (only for weighted mode) */}
+      {splitType === "weighted" && (
+        <Sec title={t.weighting} icon={Target}>
+          <Input label={t.cashWeight} value={cashWeight} onChange={v => setCashWeight(v)} pre="" suf="%" tip="Higher = capital contribution matters more than work" />
+          <div className="flex justify-between mt-2">
+            <span className="text-[10px] font-medium" style={{ color: B.mut }}>Work weight: {workWeight}%</span>
+            <span className="text-[10px] font-medium" style={{ color: B.mut }}>Cash weight: {cashWeight}%</span>
+          </div>
+          <div className="w-full h-2 rounded-full mt-1 overflow-hidden" style={{ background: B.brd }}>
+            <div className="h-full rounded-full" style={{ width: `${cashWeight}%`, background: `linear-gradient(90deg, ${B.gold}, ${B.pri})` }} />
+          </div>
+        </Sec>
+      )}
+
+      {/* Validation warnings */}
+      {totalCash !== 100 && splitType !== "equal" && (
+        <div className="rounded-xl p-3 flex items-center gap-2" style={{ background: B.goldL, border: `1px solid ${B.gold}` }}>
+          <AlertTriangle size={14} style={{ color: B.goldD, flexShrink: 0 }} />
+          <p className="text-xs" style={{ color: B.goldD }}>Capital percentages total {totalCash}% (should be 100%). Adjust so the math is clean.</p>
+        </div>
+      )}
+
+      {/* Pie chart */}
+      <div className="rounded-xl p-5 border" style={{ borderColor: B.brd }}>
+        <h3 className="text-sm font-bold mb-3 text-center" style={{ color: B.txt }}>Split Breakdown</h3>
+        <div style={{ height: 200 }}>
+          <ResponsiveContainer>
+            <PieChart>
+              <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={3}>
+                {pieData.map((_, i) => <Cell key={i} fill={SPLIT_COLORS[i % 5]} />)}
+              </Pie>
+              <Tooltip formatter={v => `${v.toFixed(1)}%`} />
+              <Legend />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Result cards */}
+      <div className={`grid gap-4 ${partners.length <= 3 ? `grid-cols-${partners.length}` : "grid-cols-2"}`} style={{ gridTemplateColumns: partners.length <= 3 ? `repeat(${partners.length}, 1fr)` : "repeat(2, 1fr)" }}>
+        {results.map((r, i) => (
+          <div key={i} className="rounded-xl p-5 text-center border-2" style={{ borderColor: SPLIT_COLORS[i % 5], background: SPLIT_BGS[i % 5] }}>
+            <div className="w-8 h-8 rounded-full mx-auto mb-2 flex items-center justify-center text-white text-xs font-bold" style={{ background: SPLIT_COLORS[i % 5] }}>{r.name.charAt(0)}</div>
+            <div className="text-xs font-medium mb-1" style={{ color: B.mut }}>{r.name}</div>
+            <div className="text-2xl font-black" style={{ color: SPLIT_COLORS[i % 5] }}>{fp(r.share)}</div>
+            <div className="text-lg font-bold" style={{ color: r.amount >= 0 ? B.grn : B.red }}>{fmt(Math.round(r.amount))}</div>
+            {splitType === "weighted" && <div className="text-[10px] mt-1" style={{ color: B.mut }}>Cash: {r.cashPct}% | Work: {r.workPct}%</div>}
+          </div>
+        ))}
+      </div>
     </div>
-  </div>);
+  );
 };
 
 // ═══════════════════════════════════════════════════════════════
-// PAGE: SENSITIVITY
+// PAGE: SENSITIVITY (UPGRADED - supports all 8 deal types)
 // ═══════════════════════════════════════════════════════════════
+const SENSITIVITY_VARS = {
+  flip: [
+    { key: "rehabCost", label: "Rehab Cost" }, { key: "purchasePrice", label: "Purchase Price" },
+    { key: "arv", label: "ARV" }, { key: "interestRate", label: "Interest Rate" },
+    { key: "holdMonths", label: "Hold Period (months)" }, { key: "agentCommission", label: "Agent Commission" },
+  ],
+  brrrr: [
+    { key: "rehabCost", label: "Rehab Cost" }, { key: "purchasePrice", label: "Purchase Price" },
+    { key: "monthlyRent", label: "Monthly Rent" }, { key: "refiLTV", label: "Refi LTV" },
+    { key: "refiRate", label: "Refi Rate" }, { key: "interestRate", label: "Interest Rate" },
+    { key: "vacancyRate", label: "Vacancy Rate" },
+  ],
+  rental: [
+    { key: "purchasePrice", label: "Purchase Price" }, { key: "monthlyRent", label: "Monthly Rent" },
+    { key: "loanRate", label: "Interest Rate" }, { key: "vacancyRate", label: "Vacancy Rate" },
+    { key: "downPayment", label: "Down Payment %" }, { key: "rehabCost", label: "Rehab Cost" },
+  ],
+  str: [
+    { key: "nightlyRate", label: "Nightly Rate" }, { key: "occupancyRate", label: "Occupancy Rate" },
+    { key: "purchasePrice", label: "Purchase Price" }, { key: "loanRate", label: "Interest Rate" },
+    { key: "platformFee", label: "Platform Fee" }, { key: "furnishingCost", label: "Furnishing Cost" },
+  ],
+  wholesale: [
+    { key: "assignmentFee", label: "Assignment Fee" }, { key: "contractPrice", label: "Contract Price" },
+    { key: "arv", label: "ARV" }, { key: "estimatedRepairCost", label: "Repair Cost" },
+  ],
+  multi: [
+    { key: "avgRentPerUnit", label: "Avg Rent / Unit" }, { key: "purchasePrice", label: "Purchase Price" },
+    { key: "vacancyRate", label: "Vacancy Rate" }, { key: "loanRate", label: "Interest Rate" },
+    { key: "exitCapRate", label: "Exit Cap Rate" }, { key: "units", label: "Total Units" },
+  ],
+  mhp: [
+    { key: "lotRent", label: "Lot Rent" }, { key: "purchasePrice", label: "Purchase Price" },
+    { key: "occupiedLots", label: "Occupied Lots" }, { key: "loanRate", label: "Interest Rate" },
+    { key: "marketLotRent", label: "Market Lot Rent" }, { key: "infillCostPerLot", label: "Infill Cost / Lot" },
+  ],
+  storage: [
+    { key: "avgRentPerUnit", label: "Avg Rent / Unit" }, { key: "purchasePrice", label: "Purchase Price" },
+    { key: "occupiedUnits", label: "Occupied Units" }, { key: "loanRate", label: "Interest Rate" },
+    { key: "marketRatePerUnit", label: "Market Rate / Unit" },
+  ],
+};
+
 const Sensitivity = ({ deals, t, getGradeL, localDealTypes }) => {
   const [si, setSi] = useState(0);
-  const [variable, setVariable] = useState("rehab");
+  const [varIdx, setVarIdx] = useState(0);
   const [range, setRange] = useState(30);
-  if (!deals.length) return (<div className="text-center py-16"><Target size={48} style={{ color: B.brd, margin: "0 auto 12px" }} /><h3 className="text-lg font-bold mb-2">{t.saveDealFirst}</h3><p className="text-sm" style={{ color: B.mut }}>{t.whatIfDesc}</p></div>);
-  const deal = deals[si] || deals[0];
-  const vm = { rehab: { key: "rehabCost", label: t.rehabCost }, purchase: { key: "purchasePrice", label: t.purchasePrice }, rent: { key: "monthlyRent", label: t.monthlyRent }, rate: { key: deal.type === "flip" ? "interestRate" : "loanRate", label: t.interestRate }, hold: { key: deal.type === "flip" ? "holdMonths" : "vacancyRate", label: deal.type === "flip" ? t.holdPeriod : t.vacancy } };
-  const avail = Object.entries(vm).filter(([, v]) => deal.data[v.key] !== undefined);
-  const v = vm[variable] || avail[0]?.[1]; if (!v) return null;
-  const bv = deal.data[v.key]; const calc = CALCS[deal.type];
-  const pts = [];
-  for (let p = -range; p <= range; p += range / 5) {
-    const adj = { ...deal.data, [v.key]: bv * (1 + p / 100) }; const r = calc(adj);
-    pts.push({ label: `${p >= 0 ? "+" : ""}${Math.round(p)}%`, value: Math.round(bv * (1 + p / 100)), profit: r.profit || r.annCF || (r.moCF || 0) * 12, score: Math.round(r.score) });
-  }
-  return (<div className="space-y-6">
-    <div className="flex gap-4 flex-wrap">
-      <div className="flex-1 min-w-48"><label className="text-xs font-medium mb-1 block" style={{ color: B.mut }}>{t.deal}</label><select value={si} onChange={e => setSi(Number(e.target.value))} className="w-full p-2 rounded-lg border text-sm" style={{ borderColor: B.brd }}>{deals.map((d, i) => <option key={d.id} value={i}>{d.data.name || localDealTypes.find(dt => dt.id === d.type)?.label}</option>)}</select></div>
-      <div className="flex-1 min-w-48"><label className="text-xs font-medium mb-1 block" style={{ color: B.mut }}>{t.variable}</label><select value={variable} onChange={e => setVariable(e.target.value)} className="w-full p-2 rounded-lg border text-sm" style={{ borderColor: B.brd }}>{avail.map(([k, v2]) => <option key={k} value={k}>{v2.label}</option>)}</select></div>
-      <div className="flex-1 min-w-24"><label className="text-xs font-medium mb-1 block" style={{ color: B.mut }}>{t.range}</label><select value={range} onChange={e => setRange(Number(e.target.value))} className="w-full p-2 rounded-lg border text-sm" style={{ borderColor: B.brd }}>{[10, 20, 30, 50].map(r => <option key={r} value={r}>+/-{r}%</option>)}</select></div>
+
+  if (!deals.length) return (
+    <div className="text-center py-16">
+      <Target size={48} style={{ color: B.brd, margin: "0 auto 12px" }} />
+      <h3 className="text-lg font-bold mb-2">{t.saveDealFirst}</h3>
+      <p className="text-sm" style={{ color: B.mut }}>{t.whatIfDesc}</p>
     </div>
-    <Sec title={`${t.whatIfTitle} ${v.label} ${t.changes}`} icon={Target}><div style={{ height: 220 }}><ResponsiveContainer><AreaChart data={pts} margin={{ left: 10, right: 10 }}><XAxis dataKey="label" tick={{ fontSize: 10 }} /><YAxis tickFormatter={v2 => fmtK(v2)} tick={{ fontSize: 10 }} /><Tooltip formatter={v2 => fmt(v2)} /><Area type="monotone" dataKey="profit" name={t.profitCF} stroke={B.pri} fill={B.acc} fillOpacity={0.3} /></AreaChart></ResponsiveContainer></div></Sec>
-    <Sec title={t.scoreImpact} icon={Award}><div style={{ height: 180 }}><ResponsiveContainer><LineChart data={pts} margin={{ left: 10, right: 10 }}><XAxis dataKey="label" tick={{ fontSize: 10 }} /><YAxis domain={[0, 100]} tick={{ fontSize: 10 }} /><Tooltip /><Line type="monotone" dataKey="score" name={t.score} stroke={B.gold} strokeWidth={3} dot={{ fill: B.gold }} /></LineChart></ResponsiveContainer></div></Sec>
-    <Sec title={t.dataTable} icon={FileText}><div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr style={{ background: "#F9FAFB" }}><th className="p-2 text-left font-medium" style={{ color: B.mut }}>{t.change}</th><th className="p-2 text-right font-medium" style={{ color: B.mut }}>{v.label}</th><th className="p-2 text-right font-medium" style={{ color: B.mut }}>{t.profitCF}</th><th className="p-2 text-right font-medium" style={{ color: B.mut }}>{t.score}</th></tr></thead><tbody>{pts.map((p, i) => (<tr key={i} className="border-t" style={{ borderColor: B.brd, background: p.label === "+0%" ? B.goldL : "transparent" }}><td className="p-2">{p.label}</td><td className="p-2 text-right">{v.key.includes("Rate") || v.key.includes("vacancy") ? `${p.value.toFixed?.(1) || p.value}%` : fmt(p.value)}</td><td className="p-2 text-right font-medium" style={{ color: p.profit >= 0 ? B.grn : B.red }}>{fmt(p.profit)}</td><td className="p-2 text-right"><span className="px-1.5 py-0.5 rounded text-xs font-bold" style={{ background: getGradeL(p.score).bg, color: getGradeL(p.score).color }}>{p.score}</span></td></tr>))}</tbody></table></div></Sec>
-  </div>);
+  );
+
+  const deal = deals[si] || deals[0];
+  const vars = (SENSITIVITY_VARS[deal.type] || []).filter(v => deal.data[v.key] !== undefined && deal.data[v.key] !== 0);
+  const v = vars[varIdx] || vars[0];
+  if (!v) return null;
+
+  const bv = deal.data[v.key];
+  const calc = CALCS[deal.type];
+  const isPercent = v.key.includes("Rate") || v.key.includes("vacancy") || v.key.includes("Percent") || v.key.includes("LTV") || v.key.includes("Fee") || v.key.includes("downPayment") || v.key.includes("Commission") || v.key.includes("occupancy");
+  const isInteger = v.key.includes("Months") || v.key.includes("months") || v.key.includes("Lots") || v.key.includes("lots") || v.key.includes("Units") || v.key.includes("units") || v.key.includes("Days");
+
+  const pts = [];
+  const steps = 11;
+  for (let i = 0; i < steps; i++) {
+    const p = -range + (2 * range * i) / (steps - 1);
+    const adjVal = bv * (1 + p / 100);
+    const adj = { ...deal.data, [v.key]: isInteger ? Math.round(adjVal) : adjVal };
+    const r = calc(adj);
+    const profit = r.profit != null ? r.profit : (r.annCF != null ? r.annCF : (r.moCF || 0) * 12);
+    pts.push({
+      label: `${p >= 0 ? "+" : ""}${Math.round(p)}%`,
+      pct: Math.round(p),
+      value: isInteger ? Math.round(adjVal) : adjVal,
+      profit: Math.round(profit),
+      moCF: r.moCF != null ? Math.round(r.moCF) : null,
+      score: Math.round(r.score),
+      roi: r.roi != null ? r.roi : (r.coC != null ? r.coC : null),
+    });
+  }
+
+  const baseIdx = Math.floor(steps / 2);
+  const baseProfit = pts[baseIdx]?.profit || 0;
+  const baseScore = pts[baseIdx]?.score || 0;
+  const worstProfit = Math.min(...pts.map(p => p.profit));
+  const bestProfit = Math.max(...pts.map(p => p.profit));
+  const breakEvenIdx = pts.findIndex((p, i) => i > 0 && ((pts[i-1].profit >= 0 && p.profit < 0) || (pts[i-1].profit < 0 && p.profit >= 0)));
+
+  return (
+    <div className="space-y-6">
+      {/* Header with deal summary */}
+      <div className="rounded-xl p-4" style={{ background: B.pri }}>
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h3 className="text-sm font-bold text-white">{deal.data.name || localDealTypes.find(dt => dt.id === deal.type)?.label || "Deal"}</h3>
+            <p className="text-xs" style={{ color: B.accL }}>Sensitivity Analysis - How does your deal hold up?</p>
+          </div>
+          <div className="flex gap-3">
+            <div className="text-center px-3 py-1 rounded-lg" style={{ background: B.acc }}>
+              <div className="text-xs" style={{ color: B.accL }}>Base Profit</div>
+              <div className="text-sm font-bold text-white">{fmt(baseProfit)}</div>
+            </div>
+            <div className="text-center px-3 py-1 rounded-lg" style={{ background: B.acc }}>
+              <div className="text-xs" style={{ color: B.accL }}>Score</div>
+              <div className="text-sm font-bold" style={{ color: B.gold }}>{baseScore}/100</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Controls */}
+      <div className="flex gap-4 flex-wrap">
+        <div className="flex-1 min-w-[180px]">
+          <label className="text-xs font-medium mb-1 block" style={{ color: B.mut }}>{t.deal}</label>
+          <select value={si} onChange={e => { setSi(Number(e.target.value)); setVarIdx(0); }} className="w-full p-2.5 rounded-lg border text-sm" style={{ borderColor: B.brd }}>
+            {deals.map((d, i) => <option key={d.id} value={i}>{d.data.name || localDealTypes.find(dt => dt.id === d.type)?.label}</option>)}
+          </select>
+        </div>
+        <div className="flex-1 min-w-[180px]">
+          <label className="text-xs font-medium mb-1 block" style={{ color: B.mut }}>{t.variable}</label>
+          <select value={varIdx} onChange={e => setVarIdx(Number(e.target.value))} className="w-full p-2.5 rounded-lg border text-sm" style={{ borderColor: B.brd }}>
+            {vars.map((vr, i) => <option key={vr.key} value={i}>{vr.label}</option>)}
+          </select>
+        </div>
+        <div className="flex-1 min-w-[100px]">
+          <label className="text-xs font-medium mb-1 block" style={{ color: B.mut }}>{t.range}</label>
+          <select value={range} onChange={e => setRange(Number(e.target.value))} className="w-full p-2.5 rounded-lg border text-sm" style={{ borderColor: B.brd }}>
+            {[10, 20, 30, 50].map(r => <option key={r} value={r}>+/- {r}%</option>)}
+          </select>
+        </div>
+      </div>
+
+      {/* Quick insight strip */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-xl p-3 text-center" style={{ background: B.redL, border: `1px solid ${B.red}30` }}>
+          <div className="text-[10px] font-medium" style={{ color: B.red }}>WORST CASE (-{range}%)</div>
+          <div className="text-sm font-bold" style={{ color: worstProfit >= 0 ? B.grn : B.red }}>{fmt(worstProfit)}</div>
+        </div>
+        <div className="rounded-xl p-3 text-center" style={{ background: B.goldL, border: `1px solid ${B.gold}30` }}>
+          <div className="text-[10px] font-medium" style={{ color: B.goldD }}>CURRENT</div>
+          <div className="text-sm font-bold" style={{ color: B.pri }}>{fmt(baseProfit)}</div>
+        </div>
+        <div className="rounded-xl p-3 text-center" style={{ background: B.grnL, border: `1px solid ${B.grn}30` }}>
+          <div className="text-[10px] font-medium" style={{ color: B.grn }}>BEST CASE (+{range}%)</div>
+          <div className="text-sm font-bold" style={{ color: B.grn }}>{fmt(bestProfit)}</div>
+        </div>
+      </div>
+
+      {breakEvenIdx > -1 && (
+        <div className="rounded-xl p-3 flex items-center gap-2" style={{ background: B.redL, border: `1px solid ${B.red}` }}>
+          <AlertTriangle size={16} style={{ color: B.red, flexShrink: 0 }} />
+          <p className="text-xs font-medium" style={{ color: "#7F1D1D" }}>
+            Break-even threshold: This deal turns negative around {pts[breakEvenIdx]?.label} change in {v.label.toLowerCase()}. Know your floor before committing.
+          </p>
+        </div>
+      )}
+
+      {/* Profit/CF chart */}
+      <Sec title={`${v.label}: Impact on Profit / Cash Flow`} icon={Target}>
+        <div style={{ height: 240 }}>
+          <ResponsiveContainer>
+            <AreaChart data={pts} margin={{ left: 10, right: 10, top: 5, bottom: 5 }}>
+              <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+              <YAxis tickFormatter={v2 => fmtK(v2)} tick={{ fontSize: 10 }} />
+              <Tooltip formatter={v2 => fmt(v2)} labelFormatter={l => `${v.label} ${l}`} />
+              <Area type="monotone" dataKey="profit" name={t.profitCF} stroke={B.pri} fill={B.acc} fillOpacity={0.3} strokeWidth={2} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </Sec>
+
+      {/* Score impact chart */}
+      <Sec title="Deal Score Sensitivity" icon={Award}>
+        <div style={{ height: 200 }}>
+          <ResponsiveContainer>
+            <BarChart data={pts} margin={{ left: 10, right: 10, top: 5, bottom: 5 }}>
+              <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+              <YAxis domain={[0, 100]} tick={{ fontSize: 10 }} />
+              <Tooltip formatter={v2 => [`${v2}/100`, "Score"]} labelFormatter={l => `${v.label} ${l}`} />
+              <Bar dataKey="score" name={t.score} radius={[4, 4, 0, 0]}>
+                {pts.map((p, i) => <Cell key={i} fill={getGradeL(p.score).color} fillOpacity={p.pct === 0 ? 1 : 0.7} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </Sec>
+
+      {/* Data table */}
+      <Sec title={t.dataTable} icon={FileText}>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr style={{ background: "#F9FAFB" }}>
+                <th className="p-2 text-left font-medium" style={{ color: B.mut }}>{t.change}</th>
+                <th className="p-2 text-right font-medium" style={{ color: B.mut }}>{v.label}</th>
+                <th className="p-2 text-right font-medium" style={{ color: B.mut }}>{t.profitCF}</th>
+                <th className="p-2 text-right font-medium" style={{ color: B.mut }}>vs. Base</th>
+                <th className="p-2 text-right font-medium" style={{ color: B.mut }}>{t.score}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pts.map((p, i) => {
+                const diff = p.profit - baseProfit;
+                return (
+                  <tr key={i} className="border-t" style={{ borderColor: B.brd, background: p.pct === 0 ? B.goldL : "transparent", fontWeight: p.pct === 0 ? 600 : 400 }}>
+                    <td className="p-2">{p.label}{p.pct === 0 ? " (current)" : ""}</td>
+                    <td className="p-2 text-right">{isPercent ? `${p.value.toFixed(1)}%` : isInteger ? p.value : fmt(p.value)}</td>
+                    <td className="p-2 text-right font-medium" style={{ color: p.profit >= 0 ? B.grn : B.red }}>{fmt(p.profit)}</td>
+                    <td className="p-2 text-right" style={{ color: diff > 0 ? B.grn : diff < 0 ? B.red : B.mut }}>
+                      {p.pct === 0 ? "-" : `${diff >= 0 ? "+" : ""}${fmt(diff)}`}
+                    </td>
+                    <td className="p-2 text-right">
+                      <span className="px-1.5 py-0.5 rounded text-xs font-bold" style={{ background: getGradeL(p.score).bg, color: getGradeL(p.score).color }}>
+                        {getGradeL(p.score).grade} ({p.score})
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Sec>
+    </div>
+  );
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -1365,14 +1717,10 @@ ${expRows ? `<h2 style="font-size:15px;font-weight:700;color:${B.pri};margin-bot
 }
 
 // ═══════════════════════════════════════════════════════════════
-// STRIPE CONFIG (Replace with your Stripe checkout links)
+// STRIPE CONFIG (checkout handled server-side via /api/create-checkout)
 // ═══════════════════════════════════════════════════════════════
-const STRIPE = {
-  monthly: "https://buy.stripe.com/3cIaEX237bCp1n2e996Zy0k",
-  annual: "https://buy.stripe.com/00w00j37b5e1d5K6GH6Zy0l",
-  lifetime: "https://buy.stripe.com/cNiaEX7nr35TaXC0ij6Zy0m",
-};
-const hasStripe = STRIPE.monthly || STRIPE.annual || STRIPE.lifetime;
+const PLANS = { monthly: "Monthly", annual: "Annual", lifetime: "Lifetime" };
+const hasStripe = true; // Checkout goes through API, always available
 
 // ═══════════════════════════════════════════════════════════════
 // MAIN APP
@@ -1510,12 +1858,14 @@ const handleSignOut = async () => {
   try {
     const res = await fetch("/api/create-checkout", {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ plan, email: user.email }),
     });
-    const { url } = await res.json();
-    window.location.href = url;
+    const data = await res.json();
+    if (data.error) { alert(data.error); return; }
+    if (data.url) window.location.href = data.url;
   } catch (e) {
-    alert("Checkout error. Please try again.");
+    alert("Checkout error. Please check your connection and try again.");
   }
 };
   const exportPDF = (deal) => {
@@ -1762,7 +2112,7 @@ const editDeal = (deal) => {
         </>)}
         {page === "portfolio" && <Portfolio deals={portfolio} removeDeal={removeDeal} editDeal={editDeal} exportPDF={exportPDF} t={t} getGradeL={getGradeL} localDealTypes={localDealTypes} />}
         {page === "compare" && <Compare deals={portfolio} t={t} localDealTypes={localDealTypes} />}
-        {page === "splits" && <Splits t={t} />}
+        {page === "splits" && <Splits t={t} portfolio={portfolio} localDealTypes={localDealTypes} />}
         {page === "sensitivity" && (isPro ? <Sensitivity deals={portfolio} t={t} getGradeL={getGradeL} localDealTypes={localDealTypes} /> : <ProGate feature="Sensitivity Analysis" onUnlock={() => setShowPro(false)} setShowPro={setShowPro} t={t} />)}
         {page === "budget" && <BudgetPlanner isPro={isPro} setShowPro={setShowPro} />}
         <footer className="text-center py-6 mt-8 border-t" style={{ borderColor: B.brd }}><p className="text-xs" style={{ color: B.mut }}>{t.footer}</p></footer>
