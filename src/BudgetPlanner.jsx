@@ -829,6 +829,229 @@ function DebtSnowballTab({ debts, setDebts }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// TAB 5: SAVINGS GOALS
+// ═══════════════════════════════════════════════════════════════
+function SavingsGoalsTab({ funds, setFunds, savingsLog, setSavingsLog }) {
+  const [showAddFund, setShowAddFund] = useState(false);
+  const [newFund, setNewFund] = useState({ name: "", goal: 0, startAmount: 0, startDate: "", goalDate: "", monthly: 0 });
+  const [logForm, setLogForm] = useState({ date: new Date().toISOString().slice(0, 10), amount: 0, fundId: "", details: "" });
+
+  const addFund = () => {
+    if (!newFund.name || newFund.goal <= 0) return;
+    const fund = { id: uid(), ...newFund, goal: parseFloat(newFund.goal) || 0, startAmount: parseFloat(newFund.startAmount) || 0, monthly: parseFloat(newFund.monthly) || 0 };
+    setFunds(p => [...p, fund]);
+    setNewFund({ name: "", goal: 0, startAmount: 0, startDate: "", goalDate: "", monthly: 0 });
+    setShowAddFund(false);
+  };
+  const removeFund = (id) => {
+    setFunds(p => p.filter(f => f.id !== id));
+    setSavingsLog(p => p.filter(l => l.fundId !== id));
+  };
+  const addLogEntry = () => {
+    if (!logForm.fundId || !logForm.amount) return;
+    setSavingsLog(p => [...p, { id: uid(), ...logForm, amount: parseFloat(logForm.amount) || 0 }]);
+    setLogForm(f => ({ ...f, amount: 0, details: "" }));
+  };
+
+  const getFundSaved = (fundId) => savingsLog.filter(l => l.fundId === fundId).reduce((a, l) => a + l.amount, 0);
+  const totalGoal = funds.reduce((a, f) => a + f.goal, 0);
+  const totalStart = funds.reduce((a, f) => a + f.startAmount, 0);
+  const totalSaved = savingsLog.reduce((a, l) => a + l.amount, 0);
+  const totalBalance = totalStart + totalSaved;
+  const totalLeft = Math.max(0, totalGoal - totalBalance);
+
+  const getMonthsLeft = (f) => {
+    if (!f.goalDate || !f.startDate) return null;
+    const start = new Date(f.startDate), end = new Date(f.goalDate);
+    return Math.max(0, Math.round((end - new Date()) / (1000 * 60 * 60 * 24 * 30.44)));
+  };
+
+  const getProgress = (f) => {
+    const balance = f.startAmount + getFundSaved(f.id);
+    return f.goal > 0 ? Math.min(100, (balance / f.goal) * 100) : 0;
+  };
+
+  const Input = ({ label, value, onChange, type = "text", pre }) => (
+    <div className="flex-1 min-w-0">
+      <label className="block text-xs font-medium mb-1" style={{ color: B.mut }}>{label}</label>
+      <div className="flex items-center rounded-lg border overflow-hidden" style={{ borderColor: B.brd }}>
+        {pre && <span className="px-2 text-xs font-medium" style={{ color: B.mut, background: "#F9FAFB" }}>{pre}</span>}
+        <input type={type} value={value} onChange={onChange} className="w-full px-2 py-1.5 text-sm outline-none" style={{ color: B.txt }} />
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      {/* KPI row */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <KPI icon={Target} label="Total Goal" value={fmt(totalGoal)} color={B.pri} bg={B.card} />
+        <KPI icon={PiggyBank} label="Total Balance" value={fmt(totalBalance)} color={B.grn} bg={B.grnL} />
+        <KPI icon={TrendingUp} label="Total Saved" value={fmt(totalSaved)} sub={`+ ${fmt(totalStart)} starting`} color={B.blue} bg={B.blueL} />
+        <KPI icon={Target} label="Left to Save" value={fmt(totalLeft)} color={totalLeft > 0 ? B.red : B.grn} bg={totalLeft > 0 ? B.redL : B.grnL} />
+      </div>
+
+      {/* Fund cards */}
+      <Card>
+        <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: B.brd }}>
+          <span className="font-semibold text-sm" style={{ color: B.pri }}>Savings Funds ({funds.length})</span>
+          <button onClick={() => setShowAddFund(!showAddFund)} className="flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-lg"
+            style={{ background: B.goldL, color: B.goldD, border: `1px solid ${B.gold}` }}>
+            <Plus size={12} /> Add Fund
+          </button>
+        </div>
+
+        {/* Add fund form */}
+        {showAddFund && (
+          <div className="p-4 border-b space-y-3" style={{ borderColor: B.brd, background: "#FAFBFC" }}>
+            <div className="flex flex-wrap gap-3">
+              <Input label="Fund Name" value={newFund.name} onChange={e => setNewFund(p => ({ ...p, name: e.target.value }))} />
+              <Input label="Goal Amount" value={newFund.goal || ""} onChange={e => setNewFund(p => ({ ...p, goal: e.target.value }))} type="number" pre="$" />
+              <Input label="Starting Amount" value={newFund.startAmount || ""} onChange={e => setNewFund(p => ({ ...p, startAmount: e.target.value }))} type="number" pre="$" />
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <Input label="Start Date" value={newFund.startDate} onChange={e => setNewFund(p => ({ ...p, startDate: e.target.value }))} type="date" />
+              <Input label="Goal Date" value={newFund.goalDate} onChange={e => setNewFund(p => ({ ...p, goalDate: e.target.value }))} type="date" />
+              <Input label="Monthly Contribution" value={newFund.monthly || ""} onChange={e => setNewFund(p => ({ ...p, monthly: e.target.value }))} type="number" pre="$" />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={addFund} className="px-4 py-2 rounded-lg text-xs font-semibold" style={{ background: B.gold, color: B.pri }}>Save Fund</button>
+              <button onClick={() => setShowAddFund(false)} className="px-4 py-2 rounded-lg text-xs font-medium" style={{ color: B.mut }}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {/* Fund list */}
+        {funds.length > 0 ? (
+          <div className="divide-y" style={{ borderColor: B.brd }}>
+            {funds.map(f => {
+              const saved = getFundSaved(f.id);
+              const balance = f.startAmount + saved;
+              const left = Math.max(0, f.goal - balance);
+              const pct = getProgress(f);
+              const monthsLeft = getMonthsLeft(f);
+              const neededPerMonth = monthsLeft && monthsLeft > 0 ? left / monthsLeft : null;
+              return (
+                <div key={f.id} className="p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="font-semibold text-sm" style={{ color: B.pri }}>{f.name}</span>
+                      {f.goalDate && <span className="text-xs ml-2" style={{ color: B.mut }}>Goal: {f.goalDate}</span>}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-bold" style={{ color: pct >= 100 ? B.grn : B.blue }}>{pct.toFixed(0)}%</span>
+                      <button onClick={() => removeFund(f.id)} className="p-1 rounded hover:bg-red-50 opacity-40 hover:opacity-100">
+                        <Trash2 size={12} style={{ color: B.red }} />
+                      </button>
+                    </div>
+                  </div>
+                  {/* Progress bar */}
+                  <div className="w-full rounded-full h-3" style={{ background: "#E5E7EB" }}>
+                    <div className="h-3 rounded-full transition-all" style={{ width: `${Math.min(100, pct)}%`, background: pct >= 100 ? B.grn : `linear-gradient(90deg, ${B.blue}, ${B.gold})` }} />
+                  </div>
+                  <div className="flex flex-wrap gap-4 text-xs" style={{ color: B.mut }}>
+                    <span>Balance: <strong style={{ color: B.grn }}>{fmt(balance)}</strong></span>
+                    <span>Goal: <strong style={{ color: B.pri }}>{fmt(f.goal)}</strong></span>
+                    <span>Left: <strong style={{ color: left > 0 ? B.red : B.grn }}>{fmt(left)}</strong></span>
+                    {f.monthly > 0 && <span>Monthly: <strong>{fmt(f.monthly)}</strong></span>}
+                    {monthsLeft != null && <span>{monthsLeft} months left</span>}
+                    {neededPerMonth != null && <span>Need: <strong style={{ color: neededPerMonth > (f.monthly || 0) ? B.red : B.grn }}>{fmt(neededPerMonth)}/mo</strong></span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="text-center py-10" style={{ color: B.mut }}>
+            <Target size={36} style={{ margin: "0 auto 8px", opacity: 0.3 }} />
+            <p className="text-sm">No savings funds yet. Add your first goal above!</p>
+          </div>
+        )}
+      </Card>
+
+      {/* Transaction log */}
+      {funds.length > 0 && (
+        <Card>
+          <div className="px-4 py-3 border-b" style={{ borderColor: B.brd }}>
+            <span className="font-semibold text-sm" style={{ color: B.pri }}>Savings Log</span>
+          </div>
+          <div className="p-4 space-y-3">
+            <div className="flex flex-wrap gap-3 items-end">
+              <Input label="Date" value={logForm.date} onChange={e => setLogForm(p => ({ ...p, date: e.target.value }))} type="date" />
+              <Input label="Amount" value={logForm.amount || ""} onChange={e => setLogForm(p => ({ ...p, amount: e.target.value }))} type="number" pre="$" />
+              <div className="flex-1 min-w-0">
+                <label className="block text-xs font-medium mb-1" style={{ color: B.mut }}>Fund</label>
+                <select value={logForm.fundId} onChange={e => setLogForm(p => ({ ...p, fundId: e.target.value }))}
+                  className="w-full px-2 py-1.5 rounded-lg border text-sm outline-none" style={{ borderColor: B.brd, color: B.txt }}>
+                  <option value="">Select fund...</option>
+                  {funds.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                </select>
+              </div>
+              <Input label="Details (optional)" value={logForm.details} onChange={e => setLogForm(p => ({ ...p, details: e.target.value }))} />
+              <button onClick={addLogEntry} className="px-4 py-1.5 rounded-lg text-xs font-semibold" style={{ background: B.gold, color: B.pri, marginBottom: 1 }}>
+                <Plus size={12} style={{ display: "inline", verticalAlign: -2 }} /> Log
+              </button>
+            </div>
+
+            {savingsLog.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs" style={{ minWidth: 500 }}>
+                  <thead>
+                    <tr style={{ background: "#F9FAFB", borderBottom: `1px solid ${B.brd}` }}>
+                      <th className="p-2 text-left font-semibold" style={{ color: B.mut }}>Date</th>
+                      <th className="p-2 text-right font-semibold" style={{ color: B.mut }}>Amount</th>
+                      <th className="p-2 text-left font-semibold" style={{ color: B.mut }}>Fund</th>
+                      <th className="p-2 text-left font-semibold" style={{ color: B.mut }}>Details</th>
+                      <th className="p-2 w-8"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...savingsLog].sort((a, b) => b.date.localeCompare(a.date)).map(entry => (
+                      <tr key={entry.id} style={{ borderBottom: `1px solid ${B.brd}` }}>
+                        <td className="p-2" style={{ color: B.txt }}>{entry.date}</td>
+                        <td className="p-2 text-right font-bold" style={{ color: B.grn }}>{fmt(entry.amount)}</td>
+                        <td className="p-2" style={{ color: B.pri }}>{funds.find(f => f.id === entry.fundId)?.name || "—"}</td>
+                        <td className="p-2" style={{ color: B.mut }}>{entry.details || "—"}</td>
+                        <td className="p-2">
+                          <button onClick={() => setSavingsLog(p => p.filter(l => l.id !== entry.id))} className="p-1 rounded hover:bg-red-50 opacity-40 hover:opacity-100">
+                            <Trash2 size={11} style={{ color: B.red }} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
+
+      {/* Progress chart */}
+      {funds.length > 0 && (
+        <Card>
+          <div className="px-4 py-3 border-b" style={{ borderColor: B.brd }}>
+            <span className="font-semibold text-sm" style={{ color: B.pri }}>Progress Overview</span>
+          </div>
+          <div className="p-4" style={{ height: 260 }}>
+            <ResponsiveContainer>
+              <BarChart data={funds.map(f => ({ name: f.name.length > 12 ? f.name.slice(0, 12) + "..." : f.name, Balance: f.startAmount + getFundSaved(f.id), Remaining: Math.max(0, f.goal - f.startAmount - getFundSaved(f.id)) }))} margin={{ left: 5, right: 5 }}>
+                <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+                <YAxis tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 10 }} />
+                <Tooltip formatter={v => fmt(v)} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Bar dataKey="Balance" stackId="a" fill={B.grn} radius={[0, 0, 0, 0]} />
+                <Bar dataKey="Remaining" stackId="a" fill="#E5E7EB" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
 // MAIN BUDGET PLANNER COMPONENT
 // ═══════════════════════════════════════════════════════════════
 export default function BudgetPlanner({ isPro, setShowPro }) {
@@ -854,6 +1077,18 @@ export default function BudgetPlanner({ isPro, setShowPro }) {
       return s ? JSON.parse(s) : [];
     } catch { return []; }
   });
+  const [savingsFunds, setSavingsFunds] = useState(() => {
+    try {
+      const s = localStorage.getItem("dc_savings_funds");
+      return s ? JSON.parse(s) : [];
+    } catch { return []; }
+  });
+  const [savingsLog, setSavingsLog] = useState(() => {
+    try {
+      const s = localStorage.getItem("dc_savings_log");
+      return s ? JSON.parse(s) : [];
+    } catch { return []; }
+  });
 
   // Persist on change
   useEffect(() => {
@@ -865,6 +1100,12 @@ export default function BudgetPlanner({ isPro, setShowPro }) {
   useEffect(() => {
     try { localStorage.setItem("dc_debts", JSON.stringify(debts)); } catch {}
   }, [debts]);
+  useEffect(() => {
+    try { localStorage.setItem("dc_savings_funds", JSON.stringify(savingsFunds)); } catch {}
+  }, [savingsFunds]);
+  useEffect(() => {
+    try { localStorage.setItem("dc_savings_log", JSON.stringify(savingsLog)); } catch {}
+  }, [savingsLog]);
 
   if (!isPro) {
     return (
@@ -887,6 +1128,7 @@ export default function BudgetPlanner({ isPro, setShowPro }) {
     { id: "transactions", label: "Transactions", icon: List },
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "debt", label: "Debt Snowball", icon: CreditCard },
+    { id: "savings", label: "Savings Goals", icon: Target },
   ];
 
   return (
@@ -917,6 +1159,7 @@ export default function BudgetPlanner({ isPro, setShowPro }) {
       {tab === "transactions" && <TransactionTab transactions={transactions} setTransactions={setTransactions} budgetData={budgetData} />}
       {tab === "dashboard" && <DashboardTab budgetData={budgetData} transactions={transactions} year={year} />}
       {tab === "debt" && <DebtSnowballTab debts={debts} setDebts={setDebts} />}
+      {tab === "savings" && <SavingsGoalsTab funds={savingsFunds} setFunds={setSavingsFunds} savingsLog={savingsLog} setSavingsLog={setSavingsLog} />}
     </div>
   );
 }

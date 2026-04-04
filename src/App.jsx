@@ -8,11 +8,13 @@ import {
   Calculator, DollarSign, TrendingUp, Building2, AlertTriangle, ChevronDown, ChevronUp,
   Lock, Check, ArrowRight, BarChart3, PiggyBank, Clock, Percent, Home, Layers, Warehouse,
   Users, Star, Zap, FileText, GitCompare, Settings, Menu, X, Copy, Download, Plus, Trash2,
-  ArrowUpRight, ArrowDownRight, Target, Shield, Award, Briefcase, Key, MapPin, Hash,
+  ArrowUpRight, ArrowDownRight, Target, Shield, Award, Briefcase, Key, MapPin, Hash, Activity,
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import BudgetPlanner from "./BudgetPlanner";
+import AgentHub from "./AgentHub";
+import PulseCheck from "./PulseCheck";
 import { trackEvent, EVENTS } from "./utils/analytics";
 import { fetchCloudDeals, saveCloudDeal, deleteCloudDeal, mergeLocalToCloud } from "./utils/dealSync";
 
@@ -109,7 +111,7 @@ const T = {
     mhp: "Mobile Home Park", mhpD: "MHP Operators",
     storage: "Self-Storage", storageD: "Storage Facilities",
     // Pages
-    analyze: "Analyze", portfolio: "Portfolio", compare: "Compare", splits: "Splits", whatIf: "What-If",
+    analyze: "Analyze", portfolio: "Portfolio", compare: "Compare", splits: "Splits", whatIf: "What-If", agentHub: "Agent Hub", pulseCheck: "Pulse Check",
     // Grades
     gradeAp: "Exceptional - move fast", gradeA: "Strong deal", gradeB: "Good, manageable risk",
     gradeC: "Marginal - proceed with caution", gradeD: "Weak - significant risk", gradeF: "Walk away",
@@ -162,7 +164,7 @@ const T = {
     // Deal Score
     dealScoreLabel: "Deal Score",
     // Footer
-    footer: "DealClarity by Profit Clarity Advantage - Because the books don't lie.",
+    footer: "DealClarity by Profit Clarity Advantage — Because The Books Don't Lie.",
     // Sensitivity variables
     rehabCost: "Rehab Cost", purchasePrice: "Purchase Price", monthlyRent: "Monthly Rent",
     interestRate: "Interest Rate", holdPeriod: "Hold Period", vacancy: "Vacancy",
@@ -247,7 +249,7 @@ const T = {
     multi: "Multifamiliar", multiD: "Apartamentos y Sindicacion",
     mhp: "Parque de Casas Moviles", mhpD: "Operadores de MHP",
     storage: "Autoalmacenamiento", storageD: "Instalaciones de Almacenaje",
-    analyze: "Analizar", portfolio: "Portafolio", compare: "Comparar", splits: "Socios", whatIf: "Escenarios",
+    analyze: "Analizar", portfolio: "Portafolio", compare: "Comparar", splits: "Socios", whatIf: "Escenarios", agentHub: "Agent Hub", pulseCheck: "Pulse Check",
     gradeAp: "Excepcional - actua rapido", gradeA: "Buen negocio", gradeB: "Bueno, riesgo manejable",
     gradeC: "Marginal - procede con cautela", gradeD: "Debil - riesgo significativo", gradeF: "No lo hagas",
     tagline: "Rentabilidad Real para Operadores Inmobiliarios", upgradePro: "Hazte Pro",
@@ -287,7 +289,7 @@ const T = {
     realityBad: "VERIFICACION: Tus Numeros Estan Mal", realityGood: "Este Deal Esta Bien",
     basicCalc: "Calculadora basica dice", trueNumber: "Numero real", hiddenCosts: "costos ocultos",
     dealScoreLabel: "Puntaje del Deal",
-    footer: "DealClarity por Profit Clarity Advantage - Porque los numeros no mienten.",
+    footer: "DealClarity por Profit Clarity Advantage — Porque The Books Don't Lie.",
     rehabCost: "Costo de Reforma", purchasePrice: "Precio de Compra", monthlyRent: "Alquiler Mensual",
     interestRate: "Tasa de Interes", holdPeriod: "Periodo de Mantenimiento", vacancy: "Vacancia",
     // Section headers
@@ -380,6 +382,8 @@ const getPages = (t) => [
   { id: "splits", label: t.splits, icon: Users },
   { id: "sensitivity", label: t.whatIf, icon: Target },
   { id: "budget", label: "Budget", icon: PiggyBank },
+  { id: "agent", label: t.agentHub, icon: Briefcase },
+  { id: "pulse", label: t.pulseCheck, icon: Activity },
 ];
 const getGrades = (t) => [
   { min: 90, grade: "A+", color: "#16A34A", bg: "#DCFCE7", label: t.gradeAp },
@@ -520,11 +524,11 @@ const CostPie = ({ data, height = 200 }) => (
 // ═══════════════════════════════════════════════════════════════
 const DEFAULTS = {
   flip: { name: "", purchasePrice: 200000, rehabCost: 45000, arv: 310000, closingBuy: 3, closingSell: 8, holdMonths: 5, loanAmount: 180000, interestRate: 10, loanPoints: 2, monthlyInsurance: 150, monthlyTaxes: 250, monthlyUtilities: 200, monthlyHOA: 0, monthlyMisc: 100, agentCommission: 5 },
-  brrrr: { name: "", purchasePrice: 150000, rehabCost: 40000, arv: 250000, refiLTV: 75, refiRate: 7, refiTerm: 30, monthlyRent: 1800, closingBuy: 3, closingRefi: 2, holdMonthsToRefi: 4, loanAmount: 135000, interestRate: 10, loanPoints: 2, monthlyInsurance: 130, monthlyTaxes: 200, monthlyMaintenance: 150, monthlyPM: 10, vacancyRate: 8, monthlyCapEx: 100 },
+  brrrr: { name: "", purchasePrice: 150000, rehabCost: 40000, arv: 250000, refiLTV: 75, refiRate: 7, refiTerm: 30, monthlyRent: 2200, closingBuy: 3, closingRefi: 2, holdMonthsToRefi: 4, loanAmount: 135000, interestRate: 10, loanPoints: 2, monthlyInsurance: 130, monthlyTaxes: 200, monthlyMaintenance: 150, monthlyPM: 10, vacancyRate: 8, monthlyCapEx: 100 },
   rental: { name: "", purchasePrice: 250000, rehabCost: 15000, closingBuy: 3, downPayment: 25, loanRate: 7, loanTerm: 30, monthlyRent: 2200, vacancyRate: 8, monthlyInsurance: 150, monthlyTaxes: 300, monthlyMaintenance: 200, monthlyPM: 10, monthlyHOA: 0, monthlyCapEx: 150, appreciationRate: 3 },
   str: { name: "", purchasePrice: 350000, rehabCost: 30000, closingBuy: 3, downPayment: 25, loanRate: 7, loanTerm: 30, nightlyRate: 180, occupancyRate: 65, cleaningFee: 120, avgStayNights: 3, platformFee: 15, monthlyInsurance: 250, monthlyTaxes: 400, monthlyUtilities: 350, monthlyMaintenance: 300, monthlyPM: 20, monthlyHOA: 0, monthlyCapEx: 200, furnishingCost: 15000, monthlySupplies: 150, appreciationRate: 3 },
   wholesale: { name: "", contractPrice: 150000, assignmentFee: 15000, earnestMoney: 2000, marketingCost: 500, closingCost: 500, inspectionCost: 400, arv: 250000, estimatedRepairCost: 45000, holdingDays: 21 },
-  multi: { name: "", purchasePrice: 1200000, units: 12, avgRentPerUnit: 950, closingBuy: 3, downPayment: 25, loanRate: 6.5, loanTerm: 30, vacancyRate: 7, monthlyInsurancePerUnit: 80, monthlyTaxesPerUnit: 120, monthlyMaintenancePerUnit: 100, monthlyPMPercent: 8, monthlyCapExPerUnit: 75, monthlyCommonArea: 400, annualAdminCost: 6000, appreciationRate: 3, rentGrowthRate: 2, exitCapRate: 7, holdYears: 5 },
+  multi: { name: "", purchasePrice: 1200000, units: 12, avgRentPerUnit: 1100, closingBuy: 3, downPayment: 25, loanRate: 6.5, loanTerm: 30, vacancyRate: 7, monthlyInsurancePerUnit: 80, monthlyTaxesPerUnit: 120, monthlyMaintenancePerUnit: 100, monthlyPMPercent: 8, monthlyCapExPerUnit: 75, monthlyCommonArea: 400, annualAdminCost: 6000, appreciationRate: 3, rentGrowthRate: 2, exitCapRate: 7, holdYears: 5 },
   mhp: { name: "", purchasePrice: 800000, lots: 50, occupiedLots: 40, lotRent: 350, closingBuy: 3, downPayment: 25, loanRate: 6.5, loanTerm: 25, vacancyRate: 10, monthlyInsurance: 800, monthlyTaxes: 1500, monthlyMaintenance: 1200, monthlyPMPercent: 8, monthlyUtilities: 600, monthlyAdmin: 500, monthlyCapEx: 500, infillCostPerLot: 15000, marketLotRent: 400, appreciationRate: 3 },
   storage: { name: "", purchasePrice: 600000, totalUnits: 100, occupiedUnits: 80, avgRentPerUnit: 95, closingBuy: 3, downPayment: 25, loanRate: 6.5, loanTerm: 25, monthlyInsurance: 500, monthlyTaxes: 800, monthlyMaintenance: 600, monthlyPMPercent: 8, monthlyUtilities: 400, monthlyMarketing: 300, monthlyAdmin: 400, monthlyCapEx: 400, appreciationRate: 3, marketRatePerUnit: 110 },
 };
@@ -577,7 +581,7 @@ function calcFlip(f) {
   const moHold = f.monthlyInsurance + f.monthlyTaxes + f.monthlyUtilities + f.monthlyHOA + f.monthlyMisc + moInt;
   const totHold = moHold * f.holdMonths;
   const allIn = f.purchasePrice + f.rehabCost + cBuy + cSell + agent + pts + totHold;
-  const cash = (f.purchasePrice - f.loanAmount) + f.rehabCost + cBuy + pts + (moHold - moInt) * f.holdMonths;
+  const cash = (f.purchasePrice - f.loanAmount) + f.rehabCost + cBuy + pts + moHold * f.holdMonths;
   const profit = f.arv - allIn;
   const naive = f.arv - f.purchasePrice - f.rehabCost - cBuy - cSell - agent;
   const roi = cash > 0 ? (profit / cash) * 100 : 0;
@@ -1773,7 +1777,7 @@ ${expRows ? `<h2 style="font-size:15px;font-weight:700;color:${B.pri};margin-bot
 <table style="width:100%;border-collapse:collapse;margin-bottom:24px;">${inputRows}</table>
 <div style="margin-top:30px;padding-top:16px;border-top:2px solid ${B.gold};text-align:center;">
 <div style="font-size:11px;color:#6B7280;">Generated by DealClarity — dealclarity.vercel.app</div>
-<div style="font-size:11px;color:#6B7280;">Profit Clarity Advantage | Because the books don't lie.</div></div>
+<div style="font-size:11px;color:#6B7280;">Profit Clarity Advantage | Because The Books Don't Lie.</div></div>
 <div class="no-print" style="text-align:center;margin-top:20px;"><button onclick="window.print()" style="padding:12px 32px;background:${B.pri};color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">Save as PDF / Print</button></div>
 </div></body></html>`;
   return html;
@@ -2258,7 +2262,7 @@ const handleManageSubscription = async () => {
     doc.setTextColor(107, 114, 128);
     doc.setFont("helvetica", "normal");
     doc.text("Generated by DealClarity — dealclarity.vercel.app", 15, 288);
-    doc.text("Profit Clarity Advantage | Because the books don't lie.", 15, 293);
+    doc.text("Profit Clarity Advantage | Because The Books Don't Lie.", 15, 293);
     doc.text(`Page ${i} of ${pageCount}`, 195, 288, { align: "right" });
   }
 
@@ -2341,6 +2345,8 @@ const handleManageSubscription = async () => {
         {page === "splits" && <Splits t={t} portfolio={portfolio} localDealTypes={localDealTypes} />}
         {page === "sensitivity" && (isPro ? <Sensitivity deals={portfolio} t={t} getGradeL={getGradeL} localDealTypes={localDealTypes} /> : <ProGate feature="Sensitivity Analysis" onUnlock={() => setShowPro(false)} setShowPro={setShowPro} t={t} />)}
         {page === "budget" && <BudgetPlanner isPro={isPro} setShowPro={setShowPro} />}
+        {page === "agent" && <AgentHub t={t} isPro={isPro} setShowPro={setShowPro} user={user} />}
+        {page === "pulse" && <PulseCheck isPro={isPro} setShowPro={setShowPro} />}
         <footer className="text-center py-6 mt-8 border-t" style={{ borderColor: B.brd }}><p className="text-xs" style={{ color: B.mut }}>{t.footer}</p></footer>
       </main>
 
