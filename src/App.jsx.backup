@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef, Component } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import { supabase } from "./supabase";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend,
@@ -8,15 +8,11 @@ import {
   Calculator, DollarSign, TrendingUp, Building2, AlertTriangle, ChevronDown, ChevronUp,
   Lock, Check, ArrowRight, BarChart3, PiggyBank, Clock, Percent, Home, Layers, Warehouse,
   Users, Star, Zap, FileText, GitCompare, Settings, Menu, X, Copy, Download, Plus, Trash2,
-  ArrowUpRight, ArrowDownRight, Target, Shield, Award, Briefcase, Key, MapPin, Hash, Activity,
+  ArrowUpRight, ArrowDownRight, Target, Shield, Award, Briefcase, Key, MapPin, Hash,
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import BudgetPlanner from "./BudgetPlanner";
-import AgentHub from "./AgentHub";
-import PulseCheck from "./PulseCheck";
-import { trackEvent, EVENTS } from "./utils/analytics";
-import { fetchCloudDeals, saveCloudDeal, deleteCloudDeal, mergeLocalToCloud } from "./utils/dealSync";
 
 // ═══════════════════════════════════════════════════════════════
 // CONSTANTS & BRAND
@@ -34,67 +30,7 @@ const fmtK = (n) => n == null || isNaN(n) ? "$0" : Math.abs(n) >= 1000 ? `$${(n/
 const fp = (n) => n == null || isNaN(n) ? "0%" : `${n.toFixed(1)}%`;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-// PRO_CODE moved to server-side (api/activate-pro.js) — no secrets in client code
-
-// ═══════════════════════════════════════════════════════════════
-// ERROR BOUNDARY
-// ═══════════════════════════════════════════════════════════════
-class ErrorBoundary extends Component {
-  constructor(props) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-  static getDerivedStateFromError(error) {
-    return { hasError: true, error };
-  }
-  componentDidCatch(error, info) {
-    console.error("DealClarity Error:", error, info);
-  }
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: B.bg, padding: 32 }}>
-          <div style={{ maxWidth: 480, textAlign: "center", background: B.card, borderRadius: 16, padding: 40, boxShadow: "0 4px 24px rgba(0,0,0,0.08)" }}>
-            <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
-            <h2 style={{ color: B.pri, fontSize: 22, fontWeight: 700, marginBottom: 8 }}>Something went wrong</h2>
-            <p style={{ color: B.mut, fontSize: 14, marginBottom: 24 }}>DealClarity ran into an issue. Your data is safe — try refreshing the page.</p>
-            <button onClick={() => window.location.reload()} style={{ background: B.gold, color: B.pri, border: "none", padding: "12px 32px", borderRadius: 12, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
-              Refresh Page
-            </button>
-          </div>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// TOAST NOTIFICATION (replaces alert())
-// ═══════════════════════════════════════════════════════════════
-function Toast({ message, type = "error", onClose }) {
-  useEffect(() => {
-    const timer = setTimeout(onClose, 5000);
-    return () => clearTimeout(timer);
-  }, [onClose]);
-  const bg = type === "error" ? B.redL : type === "success" ? B.grnL : B.blueL;
-  const color = type === "error" ? B.red : type === "success" ? B.grn : B.blue;
-  const icon = type === "error" ? "⚠️" : type === "success" ? "✅" : "ℹ️";
-  return (
-    <div style={{ position: "fixed", top: 20, right: 20, zIndex: 10000, background: bg, border: `1px solid ${color}`, borderRadius: 12, padding: "12px 20px", maxWidth: 400, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 32px rgba(0,0,0,0.12)", animation: "slideIn 0.3s ease" }}>
-      <span style={{ fontSize: 18 }}>{icon}</span>
-      <span style={{ color, fontSize: 13, fontWeight: 500, flex: 1 }}>{message}</span>
-      <button onClick={onClose} style={{ background: "none", border: "none", color, cursor: "pointer", fontSize: 16, padding: 0 }}>✕</button>
-    </div>
-  );
-}
-
-// Input sanitizer — prevents negative values on financial fields
-const sanitizeNum = (v, allowNeg = false) => {
-  const n = parseFloat(v);
-  if (isNaN(n)) return 0;
-  return allowNeg ? n : Math.max(0, n);
-};
+const PRO_CODE = "DEALCLARITYPRO2026";
 
 // ═══════════════════════════════════════════════════════════════
 // TRANSLATIONS (EN / ES)
@@ -111,7 +47,7 @@ const T = {
     mhp: "Mobile Home Park", mhpD: "MHP Operators",
     storage: "Self-Storage", storageD: "Storage Facilities",
     // Pages
-    analyze: "Analyze", portfolio: "Portfolio", compare: "Compare", splits: "Splits", whatIf: "What-If", agentHub: "Agent Hub", pulseCheck: "Pulse Check",
+    analyze: "Analyze", portfolio: "Portfolio", compare: "Compare", splits: "Splits", whatIf: "What-If",
     // Grades
     gradeAp: "Exceptional - move fast", gradeA: "Strong deal", gradeB: "Good, manageable risk",
     gradeC: "Marginal - proceed with caution", gradeD: "Weak - significant risk", gradeF: "Walk away",
@@ -164,7 +100,7 @@ const T = {
     // Deal Score
     dealScoreLabel: "Deal Score",
     // Footer
-    footer: "DealClarity by Profit Clarity Advantage — Because The Books Don't Lie.",
+    footer: "DealClarity by Profit Clarity Advantage - Because the books don't lie.",
     // Sensitivity variables
     rehabCost: "Rehab Cost", purchasePrice: "Purchase Price", monthlyRent: "Monthly Rent",
     interestRate: "Interest Rate", holdPeriod: "Hold Period", vacancy: "Vacancy",
@@ -249,7 +185,7 @@ const T = {
     multi: "Multifamiliar", multiD: "Apartamentos y Sindicacion",
     mhp: "Parque de Casas Moviles", mhpD: "Operadores de MHP",
     storage: "Autoalmacenamiento", storageD: "Instalaciones de Almacenaje",
-    analyze: "Analizar", portfolio: "Portafolio", compare: "Comparar", splits: "Socios", whatIf: "Escenarios", agentHub: "Agent Hub", pulseCheck: "Pulse Check",
+    analyze: "Analizar", portfolio: "Portafolio", compare: "Comparar", splits: "Socios", whatIf: "Escenarios",
     gradeAp: "Excepcional - actua rapido", gradeA: "Buen negocio", gradeB: "Bueno, riesgo manejable",
     gradeC: "Marginal - procede con cautela", gradeD: "Debil - riesgo significativo", gradeF: "No lo hagas",
     tagline: "Rentabilidad Real para Operadores Inmobiliarios", upgradePro: "Hazte Pro",
@@ -289,7 +225,7 @@ const T = {
     realityBad: "VERIFICACION: Tus Numeros Estan Mal", realityGood: "Este Deal Esta Bien",
     basicCalc: "Calculadora basica dice", trueNumber: "Numero real", hiddenCosts: "costos ocultos",
     dealScoreLabel: "Puntaje del Deal",
-    footer: "DealClarity por Profit Clarity Advantage — Porque The Books Don't Lie.",
+    footer: "DealClarity por Profit Clarity Advantage - Porque los numeros no mienten.",
     rehabCost: "Costo de Reforma", purchasePrice: "Precio de Compra", monthlyRent: "Alquiler Mensual",
     interestRate: "Tasa de Interes", holdPeriod: "Periodo de Mantenimiento", vacancy: "Vacancia",
     // Section headers
@@ -382,8 +318,6 @@ const getPages = (t) => [
   { id: "splits", label: t.splits, icon: Users },
   { id: "sensitivity", label: t.whatIf, icon: Target },
   { id: "budget", label: "Budget", icon: PiggyBank },
-  { id: "agent", label: t.agentHub, icon: Briefcase },
-  { id: "pulse", label: t.pulseCheck, icon: Activity },
 ];
 const getGrades = (t) => [
   { min: 90, grade: "A+", color: "#16A34A", bg: "#DCFCE7", label: t.gradeAp },
@@ -402,15 +336,14 @@ const getGrade = (score) => GRADES.find(g => score >= g.min) || GRADES[GRADES.le
 // ═══════════════════════════════════════════════════════════════
 // SHARED UI COMPONENTS
 // ═══════════════════════════════════════════════════════════════
-const Input = ({ label, value, onChange, pre = "$", suf, tip, sm, text, min, allowNeg }) => (
+const Input = ({ label, value, onChange, pre = "$", suf, tip, sm, text }) => (
   <div className={sm ? "flex-1 min-w-0" : "w-full"}>
     <label className="block text-xs font-medium mb-1" style={{ color: B.mut }}>
       {label}{tip && <span className="ml-1 cursor-help" title={tip}>ℹ️</span>}
     </label>
     <div className="flex items-center rounded-lg border overflow-hidden" style={{ borderColor: B.brd, background: "#fff" }}>
       {pre && !text && <span className="px-2 text-sm font-medium" style={{ color: B.mut, background: "#F9FAFB", borderRight: `1px solid ${B.brd}`, padding: "8px 10px" }}>{pre}</span>}
-      <input type={text ? "text" : "number"} value={value} min={min ?? (allowNeg ? undefined : 0)}
-        onChange={e => text ? onChange(e.target.value) : onChange(sanitizeNum(e.target.value, allowNeg))}
+      <input type={text ? "text" : "number"} value={value} onChange={e => text ? onChange(e.target.value) : onChange(Number(e.target.value) || 0)}
         placeholder={text ? "e.g. 123 Main St Flip" : ""} className="w-full px-3 py-2 text-sm outline-none" style={{ color: B.txt }} />
       {suf && <span className="px-2 text-xs whitespace-nowrap" style={{ color: B.mut, background: "#F9FAFB", borderLeft: `1px solid ${B.brd}`, padding: "8px 10px" }}>{suf}</span>}
     </div>
@@ -524,11 +457,11 @@ const CostPie = ({ data, height = 200 }) => (
 // ═══════════════════════════════════════════════════════════════
 const DEFAULTS = {
   flip: { name: "", purchasePrice: 200000, rehabCost: 45000, arv: 310000, closingBuy: 3, closingSell: 8, holdMonths: 5, loanAmount: 180000, interestRate: 10, loanPoints: 2, monthlyInsurance: 150, monthlyTaxes: 250, monthlyUtilities: 200, monthlyHOA: 0, monthlyMisc: 100, agentCommission: 5 },
-  brrrr: { name: "", purchasePrice: 150000, rehabCost: 40000, arv: 250000, refiLTV: 75, refiRate: 7, refiTerm: 30, monthlyRent: 2200, closingBuy: 3, closingRefi: 2, holdMonthsToRefi: 4, loanAmount: 135000, interestRate: 10, loanPoints: 2, monthlyInsurance: 130, monthlyTaxes: 200, monthlyMaintenance: 150, monthlyPM: 10, vacancyRate: 8, monthlyCapEx: 100 },
+  brrrr: { name: "", purchasePrice: 150000, rehabCost: 40000, arv: 250000, refiLTV: 75, refiRate: 7, refiTerm: 30, monthlyRent: 1800, closingBuy: 3, closingRefi: 2, holdMonthsToRefi: 4, loanAmount: 135000, interestRate: 10, loanPoints: 2, monthlyInsurance: 130, monthlyTaxes: 200, monthlyMaintenance: 150, monthlyPM: 10, vacancyRate: 8, monthlyCapEx: 100 },
   rental: { name: "", purchasePrice: 250000, rehabCost: 15000, closingBuy: 3, downPayment: 25, loanRate: 7, loanTerm: 30, monthlyRent: 2200, vacancyRate: 8, monthlyInsurance: 150, monthlyTaxes: 300, monthlyMaintenance: 200, monthlyPM: 10, monthlyHOA: 0, monthlyCapEx: 150, appreciationRate: 3 },
   str: { name: "", purchasePrice: 350000, rehabCost: 30000, closingBuy: 3, downPayment: 25, loanRate: 7, loanTerm: 30, nightlyRate: 180, occupancyRate: 65, cleaningFee: 120, avgStayNights: 3, platformFee: 15, monthlyInsurance: 250, monthlyTaxes: 400, monthlyUtilities: 350, monthlyMaintenance: 300, monthlyPM: 20, monthlyHOA: 0, monthlyCapEx: 200, furnishingCost: 15000, monthlySupplies: 150, appreciationRate: 3 },
   wholesale: { name: "", contractPrice: 150000, assignmentFee: 15000, earnestMoney: 2000, marketingCost: 500, closingCost: 500, inspectionCost: 400, arv: 250000, estimatedRepairCost: 45000, holdingDays: 21 },
-  multi: { name: "", purchasePrice: 1200000, units: 12, avgRentPerUnit: 1100, closingBuy: 3, downPayment: 25, loanRate: 6.5, loanTerm: 30, vacancyRate: 7, monthlyInsurancePerUnit: 80, monthlyTaxesPerUnit: 120, monthlyMaintenancePerUnit: 100, monthlyPMPercent: 8, monthlyCapExPerUnit: 75, monthlyCommonArea: 400, annualAdminCost: 6000, appreciationRate: 3, rentGrowthRate: 2, exitCapRate: 7, holdYears: 5 },
+  multi: { name: "", purchasePrice: 1200000, units: 12, avgRentPerUnit: 950, closingBuy: 3, downPayment: 25, loanRate: 6.5, loanTerm: 30, vacancyRate: 7, monthlyInsurancePerUnit: 80, monthlyTaxesPerUnit: 120, monthlyMaintenancePerUnit: 100, monthlyPMPercent: 8, monthlyCapExPerUnit: 75, monthlyCommonArea: 400, annualAdminCost: 6000, appreciationRate: 3, rentGrowthRate: 2, exitCapRate: 7, holdYears: 5 },
   mhp: { name: "", purchasePrice: 800000, lots: 50, occupiedLots: 40, lotRent: 350, closingBuy: 3, downPayment: 25, loanRate: 6.5, loanTerm: 25, vacancyRate: 10, monthlyInsurance: 800, monthlyTaxes: 1500, monthlyMaintenance: 1200, monthlyPMPercent: 8, monthlyUtilities: 600, monthlyAdmin: 500, monthlyCapEx: 500, infillCostPerLot: 15000, marketLotRent: 400, appreciationRate: 3 },
   storage: { name: "", purchasePrice: 600000, totalUnits: 100, occupiedUnits: 80, avgRentPerUnit: 95, closingBuy: 3, downPayment: 25, loanRate: 6.5, loanTerm: 25, monthlyInsurance: 500, monthlyTaxes: 800, monthlyMaintenance: 600, monthlyPMPercent: 8, monthlyUtilities: 400, monthlyMarketing: 300, monthlyAdmin: 400, monthlyCapEx: 400, appreciationRate: 3, marketRatePerUnit: 110 },
 };
@@ -581,7 +514,7 @@ function calcFlip(f) {
   const moHold = f.monthlyInsurance + f.monthlyTaxes + f.monthlyUtilities + f.monthlyHOA + f.monthlyMisc + moInt;
   const totHold = moHold * f.holdMonths;
   const allIn = f.purchasePrice + f.rehabCost + cBuy + cSell + agent + pts + totHold;
-  const cash = (f.purchasePrice - f.loanAmount) + f.rehabCost + cBuy + pts + moHold * f.holdMonths;
+  const cash = (f.purchasePrice - f.loanAmount) + f.rehabCost + cBuy + pts + (moHold - moInt) * f.holdMonths;
   const profit = f.arv - allIn;
   const naive = f.arv - f.purchasePrice - f.rehabCost - cBuy - cSell - agent;
   const roi = cash > 0 ? (profit / cash) * 100 : 0;
@@ -1777,7 +1710,7 @@ ${expRows ? `<h2 style="font-size:15px;font-weight:700;color:${B.pri};margin-bot
 <table style="width:100%;border-collapse:collapse;margin-bottom:24px;">${inputRows}</table>
 <div style="margin-top:30px;padding-top:16px;border-top:2px solid ${B.gold};text-align:center;">
 <div style="font-size:11px;color:#6B7280;">Generated by DealClarity — dealclarity.vercel.app</div>
-<div style="font-size:11px;color:#6B7280;">Profit Clarity Advantage | Because The Books Don't Lie.</div></div>
+<div style="font-size:11px;color:#6B7280;">Profit Clarity Advantage | Because the books don't lie.</div></div>
 <div class="no-print" style="text-align:center;margin-top:20px;"><button onclick="window.print()" style="padding:12px 32px;background:${B.pri};color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">Save as PDF / Print</button></div>
 </div></body></html>`;
   return html;
@@ -1812,7 +1745,7 @@ export default function DealClarity() {
   const localPages = useMemo(() => getPages(t), [lang]);
   const localGrades = useMemo(() => getGrades(t), [lang]);
   const getGradeL = (score) => localGrades.find(g => score >= g.min) || localGrades[localGrades.length - 1];
-  const toggleLang = () => { const n = lang === "en" ? "es" : "en"; setLang(n); try { localStorage.setItem("dc_lang", n); } catch {} trackEvent(EVENTS.LANGUAGE_TOGGLED, { lang: n }); };
+  const toggleLang = () => { const n = lang === "en" ? "es" : "en"; setLang(n); try { localStorage.setItem("dc_lang", n); } catch {} };
   const [dealData, setDealData] = useState(() => { const d = {}; DEAL_TYPES.forEach(dt => { d[dt.id] = { ...DEFAULTS[dt.id] }; }); return d; });
   const [portfolio, setPortfolio] = useState(() => {
     try { const s = localStorage.getItem("dc_portfolio"); return s ? JSON.parse(s) : []; } catch { return []; }
@@ -1824,7 +1757,7 @@ export default function DealClarity() {
   const [email, setEmail] = useState("");
   const [emailDone, setEmailDone] = useState(false);
   const [pdfMsg, setPdfMsg] = useState("");
-  const [isPro, setIsPro] = useState(false); // Always starts false — verified from Supabase via onAuthStateChange
+  const [isPro, setIsPro] = useState(() => { try { return localStorage.getItem("dc_pro") === "true"; } catch { return false; } });
   const [user, setUser] = useState(null);
 const [showAuth, setShowAuth] = useState(false);
 const [authEmail, setAuthEmail] = useState("");
@@ -1832,116 +1765,21 @@ const [authPassword, setAuthPassword] = useState("");
 const [authMode, setAuthMode] = useState("signin");
 const [authError, setAuthError] = useState("");
 const [authLoading, setAuthLoading] = useState(false);
-  const [toast, setToast] = useState(null); // { message, type }
-  const showToast = useCallback((message, type = "error") => setToast({ message, type }), []);
   const [proCode, setProCode] = useState("");
   const [proMsg, setProMsg] = useState("");
-  const [syncing, setSyncing] = useState(false);
-  const [trialEndsAt, setTrialEndsAt] = useState(null);
-  const trialDaysLeft = useMemo(() => {
-    if (!trialEndsAt) return null;
-    const diff = new Date(trialEndsAt) - new Date();
-    return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
-  }, [trialEndsAt]);
 
   // Persist portfolio to localStorage whenever it changes
   const saveToStorage = useCallback((p) => {
     try { localStorage.setItem("dc_portfolio", JSON.stringify(p)); } catch {}
   }, []);
 
-  // ── Auth state listener: auto-detect login/logout, sync deals from cloud ──
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === "SIGNED_IN" && session?.user) {
-        setUser(session.user);
-        const { data: profile } = await supabase.from("profiles").select("is_pro, pro_type, trial_ends_at").eq("id", session.user.id).single();
-        if (profile?.is_pro) {
-          setIsPro(true);
-          // Sync: merge any local deals to cloud, then load cloud portfolio
-          setSyncing(true);
-          try {
-            const localDeals = portfolio.length > 0 ? portfolio : [];
-            const { deals, newUploads } = await mergeLocalToCloud(localDeals, session.user.id);
-            setPortfolio(deals);
-            if (newUploads > 0) showToast(`${newUploads} local deal${newUploads > 1 ? "s" : ""} synced to cloud!`, "success");
-            // Clear localStorage now that deals live in cloud
-            try { localStorage.removeItem("dc_portfolio"); } catch {}
-          } catch (err) {
-            console.error("Cloud sync error:", err);
-          }
-          setSyncing(false);
-        }
-      } else if (event === "SIGNED_OUT") {
-        setUser(null);
-        setIsPro(false);
-        setPortfolio([]);
-        try { localStorage.removeItem("dc_portfolio"); localStorage.removeItem("dc_pro"); } catch {}
-      }
-    });
-    return () => subscription.unsubscribe();
-  }, []);
-
-  // ── Check ?upgraded=true after Stripe redirect ──
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("upgraded") === "true") {
-      // Clean URL
-      window.history.replaceState({}, "", window.location.pathname);
-      // Refresh Pro status from Supabase
-      (async () => {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
-          const { data: profile } = await supabase.from("profiles").select("is_pro, pro_type").eq("id", session.user.id).single();
-          if (profile?.is_pro) {
-            setIsPro(true);
-            try { localStorage.setItem("dc_pro", "true"); } catch {}
-            showToast("Pro activated! Welcome to DealClarity Pro.", "success");
-          }
-        }
-      })();
-    }
-  }, [showToast]);
-
-  // ── Refresh Pro status on window focus (e.g., returning from Stripe) ──
-  useEffect(() => {
-    const handleFocus = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        setUser(session.user);
-        const { data: profile } = await supabase.from("profiles").select("is_pro, pro_type").eq("id", session.user.id).single();
-        if (profile?.is_pro && !isPro) {
-          setIsPro(true);
-          try { localStorage.setItem("dc_pro", "true"); } catch {}
-          showToast("Pro status synced!", "success");
-        }
-      }
-    };
-    window.addEventListener("focus", handleFocus);
-    return () => window.removeEventListener("focus", handleFocus);
-  }, [isPro, showToast]);
-
   const activatePro = async (code) => {
-  if (!user) { setProMsg("Please sign in first to activate a code."); setTimeout(() => setProMsg(""), 3000); return; }
-  setProMsg("Validating...");
-  try {
-    const res = await fetch("/api/activate-pro", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code, email: user.email }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      setIsPro(true);
-      try { localStorage.setItem("dc_pro", "true"); } catch {}
-      setProMsg("Pro activated! Full access unlocked.");
-      trackEvent(EVENTS.PRO_ACTIVATED, { method: "code" });
-      setTimeout(() => { setProMsg(""); setShowPro(false); }, 2000);
-    } else {
-      setProMsg(data.error || "Invalid code. Please check and try again.");
-      setTimeout(() => setProMsg(""), 3000);
-    }
-  } catch {
-    setProMsg("Connection error. Please try again.");
+  if (code === PRO_CODE) {
+    setIsPro(true);
+    setProMsg("Pro activated! Full access unlocked.");
+    setTimeout(() => { setProMsg(""); setShowPro(false); }, 2000);
+  } else {
+    setProMsg("Invalid code. Please check and try again.");
     setTimeout(() => setProMsg(""), 3000);
   }
 };
@@ -1950,39 +1788,15 @@ const handleAuth = async () => {
   setAuthError(""); setAuthLoading(true);
   try {
     if (authMode === "signup") {
-      const { data: signUpData, error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
+      const { error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
       if (error) throw error;
-      // Start 7-day trial on signup
-      if (signUpData?.user) {
-        const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-        await supabase.from("profiles").update({
-          trial_started: true,
-          trial_ends_at: trialEnd,
-          is_pro: true,
-          pro_type: "trial",
-        }).eq("id", signUpData.user.id);
-      }
-      setAuthError("Check your email to confirm your account. You'll get 7 days of Pro free!");
-      trackEvent(EVENTS.AUTH_SIGNUP);
+      setAuthError("Check your email to confirm your account.");
     } else {
       const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
       if (error) throw error;
-      trackEvent(EVENTS.AUTH_SIGNIN);
-      const { data: profile } = await supabase.from("profiles").select("is_pro, pro_type, trial_ends_at").eq("id", data.user.id).single();
+      const { data: profile } = await supabase.from("profiles").select("is_pro, pro_type").eq("id", data.user.id).single();
       setUser(data.user);
-      // Check trial expiry
-      if (profile?.pro_type === "trial" && profile?.trial_ends_at) {
-        const expired = new Date(profile.trial_ends_at) < new Date();
-        if (expired) {
-          setIsPro(false);
-          await supabase.from("profiles").update({ is_pro: false, pro_type: null }).eq("id", data.user.id);
-        } else {
-          setIsPro(true);
-          setTrialEndsAt(profile.trial_ends_at);
-        }
-      } else {
-        setIsPro(profile?.is_pro || false);
-      }
+      setIsPro(profile?.is_pro || false);
       setShowAuth(false);
     }
   } catch (e) { setAuthError(e.message); }
@@ -1991,24 +1805,7 @@ const handleAuth = async () => {
 
 const handleSignOut = async () => {
   await supabase.auth.signOut();
-  setUser(null); setIsPro(false); setPortfolio([]); try { localStorage.removeItem("dc_portfolio"); localStorage.removeItem("dc_pro"); } catch {}
-};
-
-const handleManageSubscription = async () => {
-  if (!user) return;
-  try {
-    const { data: profile } = await supabase.from("profiles").select("stripe_customer_id").eq("id", user.id).single();
-    const res = await fetch("/api/customer-portal", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ customerId: profile?.stripe_customer_id, email: user.email }),
-    });
-    const data = await res.json();
-    if (data.url) window.location.href = data.url;
-    else showToast(data.error || "Could not open subscription management.", "error");
-  } catch {
-    showToast("Connection error. Please try again.", "error");
-  }
+  setUser(null); setIsPro(false); setSavedDeals([]);
 };
 
   const cd = dealData[dealType];
@@ -2027,49 +1824,26 @@ const handleManageSubscription = async () => {
   if (result) result._inputs = cd;
   return result;
 }, [dealType, cd]);
-  const saveDeal = async () => {
+  const saveDeal = () => {
   if (editingDeal) {
-    const editedDeal = portfolio.find(d => d.id === editingDeal);
     const next = portfolio.map(d =>
       d.id === editingDeal ? { ...d, data: { ...cd }, calc } : d
     );
     setPortfolio(next);
-    // Pro: update in cloud; Free: update in localStorage
-    if (isPro && user && editedDeal?.cloudId) {
-      saveCloudDeal({ ...editedDeal, data: { ...cd }, calc }, user.id);
-    } else {
-      saveToStorage(next);
-    }
+    saveToStorage(next);
     setEditingDeal(null);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
     return;
   }
-  if (!isPro && portfolio.length >= 2) { setShowPro(true); trackEvent(EVENTS.PRO_MODAL_OPENED, { trigger: "save_limit" }); return; }
-  const newDeal = { id: uid(), type: dealType, data: { ...cd }, calc };
-  // Pro: save to cloud and get the cloud ID back
-  if (isPro && user) {
-    const saved = await saveCloudDeal(newDeal, user.id);
-    if (saved) {
-      newDeal.id = saved.id;
-      newDeal.cloudId = saved.id;
-    }
-  }
-  const next = [...portfolio, newDeal];
+  if (!isPro && portfolio.length >= 2) { setShowPro(true); return; }
+  const next = [...portfolio, { id: uid(), type: dealType, data: { ...cd }, calc }];
   setPortfolio(next);
-  if (!isPro) saveToStorage(next); // Free users still use localStorage
+  saveToStorage(next);
   setSaved(true);
-  trackEvent(EVENTS.DEAL_SAVED, { dealType, portfolioSize: next.length, cloud: !!isPro });
   setTimeout(() => setSaved(false), 2000);
 };
-  const removeDeal = async (id) => {
-    const deal = portfolio.find(d => d.id === id);
-    if (isPro && deal?.cloudId) { await deleteCloudDeal(deal.cloudId); }
-    const next = portfolio.filter(d => d.id !== id);
-    setPortfolio(next);
-    if (!isPro) saveToStorage(next);
-    trackEvent(EVENTS.DEAL_REMOVED);
-  };
+  const removeDeal = (id) => { const next = portfolio.filter(d => d.id !== id); setPortfolio(next); saveToStorage(next); };
   const editDeal = (deal) => {
   setDealType(deal.type);
   setDealData(prev => ({ ...prev, [deal.type]: { ...deal.data } }));
@@ -2081,7 +1855,6 @@ const handleManageSubscription = async () => {
   // PDF export
   const handleCheckout = async (plan) => {
   if (!user) { setShowAuth(true); return; }
-  trackEvent(EVENTS.CHECKOUT_STARTED, { plan });
   try {
     const res = await fetch("/api/create-checkout", {
       method: "POST",
@@ -2089,15 +1862,21 @@ const handleManageSubscription = async () => {
       body: JSON.stringify({ plan, email: user.email }),
     });
     const data = await res.json();
-    if (data.error) { showToast(data.error); return; }
+    if (data.error) { alert(data.error); return; }
     if (data.url) window.location.href = data.url;
   } catch (e) {
-    showToast("Checkout error. Please check your connection and try again.");
+    alert("Checkout error. Please check your connection and try again.");
   }
 };
   const exportPDF = (deal) => {
-  if (!isPro) { setShowPro(true); trackEvent(EVENTS.PRO_MODAL_OPENED, { trigger: "pdf_export" }); return; }
-  trackEvent(EVENTS.PDF_EXPORTED, { dealType: deal?.type || dealType });
+  if (!isPro) { setShowPro(true); return; }
+const editDeal = (deal) => {
+  setDealType(deal.type);
+  setDealData(prev => ({ ...prev, [deal.type]: { ...deal.data } }));
+  setEditingDeal(deal.id);
+  setPage("analyze");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+};
   const dealObj = deal || { type: dealType, data: { ...cd }, calc };
   const tDeal = DEAL_TYPES.find(dt => dt.id === dealObj.type);
   const c = dealObj.calc;
@@ -2262,7 +2041,7 @@ const handleManageSubscription = async () => {
     doc.setTextColor(107, 114, 128);
     doc.setFont("helvetica", "normal");
     doc.text("Generated by DealClarity — dealclarity.vercel.app", 15, 288);
-    doc.text("Profit Clarity Advantage | Because The Books Don't Lie.", 15, 293);
+    doc.text("Profit Clarity Advantage | Because the books don't lie.", 15, 293);
     doc.text(`Page ${i} of ${pageCount}`, 195, 288, { align: "right" });
   }
 
@@ -2274,10 +2053,7 @@ const handleManageSubscription = async () => {
   const IC = INPUTS[dealType], RC = RESULTS[dealType];
 
   return (
-    <ErrorBoundary>
     <div style={{ background: B.bg, minHeight: "100vh", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
-      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
-      <style>{`@keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }`}</style>
       <header style={{ background: B.pri, borderBottom: `3px solid ${B.gold}` }}>
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -2289,25 +2065,11 @@ const handleManageSubscription = async () => {
           </div>
           <div className="flex items-center gap-2">
             <button onClick={toggleLang} className="px-2 py-1.5 rounded-lg text-xs font-semibold hover:opacity-80 hidden md:block" style={{ background: "rgba(255,255,255,0.12)", color: "#A3B8D4" }}>{lang === "en" ? "ES" : "EN"}</button>
-            {trialDaysLeft != null && trialDaysLeft > 0 && (
-              <span className="px-2 py-1 rounded-lg text-xs font-semibold hidden md:inline-block" style={{ background: trialDaysLeft <= 2 ? B.redL : B.goldL, color: trialDaysLeft <= 2 ? B.red : B.goldD }}>
-                {trialDaysLeft}d left on trial
-              </span>
-            )}
-            {syncing && <span className="text-xs hidden md:inline-block" style={{ color: B.goldL }}>Syncing...</span>}
-            <button onClick={() => setShowPro(true)} className="px-3 py-1.5 rounded-lg text-xs font-semibold hover:opacity-90 hidden md:block" style={{ background: B.gold, color: B.pri }}>{isPro ? "Pro" : t.upgradePro}</button>
-            {user ? (
-              <div className="hidden md:flex items-center gap-2">
-                <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold" style={{ background: "rgba(255,255,255,0.15)", color: "#A3B8D4" }}>{user.email?.[0]?.toUpperCase() || "U"}</div>
-                <button onClick={handleSignOut} className="text-xs font-medium hover:opacity-80" style={{ color: "#A3B8D4" }}>Sign Out</button>
-              </div>
-            ) : (
-              <button onClick={() => setShowAuth(true)} className="hidden md:block px-3 py-1.5 rounded-lg text-xs font-semibold hover:opacity-90" style={{ background: "rgba(255,255,255,0.15)", color: "#fff" }}>Sign In</button>
-            )}
+            <button onClick={() => setShowPro(true)} className="px-3 py-1.5 rounded-lg text-xs font-semibold hover:opacity-90 hidden md:block" style={{ background: B.gold, color: B.pri }}>{t.upgradePro}</button>
             <button className="md:hidden p-2" onClick={() => setMM(!mm)}>{mm ? <X size={20} color="#fff" /> : <Menu size={20} color="#fff" />}</button>
           </div>
         </div>
-        {mm && <div className="md:hidden px-4 pb-3 flex flex-wrap gap-2">{localPages.map(p => (<button key={p.id} onClick={() => { setPage(p.id); setMM(false); }} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium" style={{ background: page === p.id ? "rgba(255,255,255,0.15)" : "transparent", color: page === p.id ? "#fff" : "#A3B8D4" }}><p.icon size={14} />{p.label}</button>))}<button onClick={toggleLang} className="px-3 py-2 rounded-lg text-xs font-medium" style={{ background: "rgba(255,255,255,0.12)", color: "#A3B8D4" }}>{lang === "en" ? "Espanol" : "English"}</button>{user ? (<button onClick={() => { handleSignOut(); setMM(false); }} className="px-3 py-2 rounded-lg text-xs font-medium" style={{ background: "rgba(220,38,38,0.15)", color: "#FCA5A5" }}>Sign Out ({user.email?.split("@")[0]})</button>) : (<button onClick={() => { setShowAuth(true); setMM(false); }} className="px-3 py-2 rounded-lg text-xs font-semibold" style={{ background: "rgba(255,255,255,0.15)", color: "#fff" }}>Sign In / Sign Up</button>)}</div>}
+        {mm && <div className="md:hidden px-4 pb-3 flex flex-wrap gap-2">{localPages.map(p => (<button key={p.id} onClick={() => { setPage(p.id); setMM(false); }} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium" style={{ background: page === p.id ? "rgba(255,255,255,0.15)" : "transparent", color: page === p.id ? "#fff" : "#A3B8D4" }}><p.icon size={14} />{p.label}</button>))}<button onClick={toggleLang} className="px-3 py-2 rounded-lg text-xs font-medium" style={{ background: "rgba(255,255,255,0.12)", color: "#A3B8D4" }}>{lang === "en" ? "Espanol" : "English"}</button></div>}
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-6">
@@ -2353,8 +2115,6 @@ const handleManageSubscription = async () => {
         {page === "splits" && <Splits t={t} portfolio={portfolio} localDealTypes={localDealTypes} />}
         {page === "sensitivity" && (isPro ? <Sensitivity deals={portfolio} t={t} getGradeL={getGradeL} localDealTypes={localDealTypes} /> : <ProGate feature="Sensitivity Analysis" onUnlock={() => setShowPro(false)} setShowPro={setShowPro} t={t} />)}
         {page === "budget" && <BudgetPlanner isPro={isPro} setShowPro={setShowPro} />}
-        {page === "agent" && <AgentHub t={t} isPro={isPro} setShowPro={setShowPro} user={user} />}
-        {page === "pulse" && <PulseCheck isPro={isPro} setShowPro={setShowPro} />}
         <footer className="text-center py-6 mt-8 border-t" style={{ borderColor: B.brd }}><p className="text-xs" style={{ color: B.mut }}>{t.footer}</p></footer>
       </main>
 
@@ -2389,10 +2149,7 @@ const handleManageSubscription = async () => {
         {user && (
           <div className="pt-2 border-t text-center" style={{ borderColor: B.brd }}>
             <p className="text-xs mb-2" style={{ color: B.mut }}>Signed in as {user.email}</p>
-            <div className="flex gap-3 justify-center">
-              {isPro && <button onClick={handleManageSubscription} className="text-xs underline" style={{ color: B.blue }}>Manage Subscription</button>}
-              <button onClick={handleSignOut} className="text-xs underline" style={{ color: B.red }}>Sign out</button>
-            </div>
+            <button onClick={handleSignOut} className="text-xs underline" style={{ color: B.red }}>Sign out</button>
           </div>
         )}
       </div>
@@ -2446,6 +2203,5 @@ const handleManageSubscription = async () => {
         </div>
       </div></div>)}
     </div>
-    </ErrorBoundary>
   );
 }

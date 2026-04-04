@@ -192,6 +192,7 @@ function CommissionTracker({ isPro, setShowPro, currency }) {
 // TAB 2: INCOME & TAX PLANNER
 // ═══════════════════════════════════════════════════════════════
 function TaxPlanner({ isPro, setShowPro, currency }) {
+  if (!isPro) return <ProGate feature="Income & Tax Planner" setShowPro={setShowPro} />;
   const [income, setIncome] = useState({ gross: 120000, otherIncome: 0 });
   const [expenses, setExpenses] = useState([
     { id: uid(), name: "MLS / Board Dues", amount: 1800, category: "business" },
@@ -678,11 +679,11 @@ function TeamDashboard({ isPro, setShowPro, currency }) {
 // MAIN AGENT HUB COMPONENT
 // ═══════════════════════════════════════════════════════════════
 const TABS = [
-  { id: "commissions", label: "Commissions", icon: DollarSign },
-  { id: "tax", label: "Tax Planner", icon: Receipt },
-  { id: "netsheet", label: "Net Sheet", icon: Home },
-  { id: "marketing", label: "Marketing ROI", icon: BarChart3 },
-  { id: "team", label: "Team", icon: Users },
+  { id: "commissions", label: "Commissions", icon: DollarSign, free: true },
+  { id: "tax", label: "Tax Planner", icon: Receipt, free: false },
+  { id: "netsheet", label: "Net Sheet", icon: Home, free: true },
+  { id: "marketing", label: "Marketing ROI", icon: BarChart3, free: false },
+  { id: "team", label: "Team", icon: Users, free: false },
 ];
 
 export default function AgentHub({ t, isPro, setShowPro, user }) {
@@ -691,6 +692,26 @@ export default function AgentHub({ t, isPro, setShowPro, user }) {
 
   return (
     <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h2 className="text-lg font-bold" style={{ color: "#0F1A2E" }}>Agent Hub</h2>
+          <p className="text-xs" style={{ color: "#6B7280" }}>Financial command center for real estate agents</p>
+        </div>
+        <span className="text-xs px-2.5 py-1 rounded-full font-semibold" style={{ background: "#F5E6C8", color: "#8B7025" }}>Pro Feature</span>
+      </div>
+
+      {/* Free user banner */}
+      {!isPro && (
+        <div className="rounded-xl p-3 flex items-center justify-between" style={{ background: "#DBEAFE", border: "1.5px solid #2563EB" }}>
+          <div className="flex items-center gap-2">
+            <Lock size={14} style={{ color: "#2563EB" }} />
+            <span className="text-xs font-medium" style={{ color: "#2563EB" }}>You're using the free preview. Upgrade to unlock all tabs and remove limits.</span>
+          </div>
+          <button onClick={() => setShowPro(true)} className="px-3 py-1 rounded-lg text-xs font-semibold" style={{ background: "#2563EB", color: "#fff" }}>Upgrade</button>
+        </div>
+      )}
+
       {/* Tab Navigation */}
       <div className="flex gap-1 overflow-x-auto pb-1">
         {TABS.map(tb => (
@@ -702,6 +723,7 @@ export default function AgentHub({ t, isPro, setShowPro, user }) {
               border: tab === tb.id ? "none" : "1px solid #E0E3EA",
             }}>
             <tb.icon size={14} /> {tb.label}
+            {!tb.free && !isPro && <Lock size={10} style={{ marginLeft: 2, opacity: 0.6 }} />}
           </button>
         ))}
       </div>
