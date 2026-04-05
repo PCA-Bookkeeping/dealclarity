@@ -606,7 +606,7 @@ export default function DealAdvisor({ deal, dealType, calc, inputs, isPro, setSh
           {/* Book promo */}
           <div className="p-3 rounded-xl text-center" style={{ background: B.bg, border: `1px solid ${B.brd}` }}>
             <p className="text-xs" style={{ color: B.mut }}>
-              Learn to build your own deal analysis framework. <a href="https://amazon.com" target="_blank" rel="noopener noreferrer" className="font-semibold underline" style={{ color: B.gold }}>"The Books Don't Lie"</a> on Amazon.
+              Learn to build your own deal analysis framework. <a href="https://www.amazon.com/dp/B0GPXXDQP2" target="_blank" rel="noopener noreferrer" className="font-semibold underline" style={{ color: B.gold }}>"The Books Don't Lie"</a> on Amazon.
             </p>
           </div>
         </div>

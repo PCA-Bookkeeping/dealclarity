@@ -331,8 +331,8 @@ export default function PulseCheck({ isPro, setShowPro }) {
           <div className="rounded-xl p-4 flex items-center gap-3" style={{ background: "#FAFBFC", border: `1px solid ${B.brd}` }}>
             <BookOpen size={18} style={{ color: B.gold, flexShrink: 0 }} />
             <p className="text-xs" style={{ color: B.mut }}>
-              The 5-Number Snapshot is from <strong style={{ color: B.pri }}>The Books Don't Lie</strong> by Fabian Janiszewski — the framework behind DealClarity.
-              {" "}<a href="https://thebooksdontlie.com" target="_blank" rel="noopener noreferrer" style={{ color: B.gold, fontWeight: 600, textDecoration: "none" }}>Learn more →</a>
+              The 5-Number Snapshot is from <a href="https://www.amazon.com/dp/B0GPXXDQP2" target="_blank" rel="noopener noreferrer" style={{ color: B.pri, fontWeight: 700, textDecoration: "underline" }}>The Books Don't Lie</a> by Fabian Janiszewski — the framework behind DealClarity.
+              {" "}<a href="https://profitclarityadvantage.com" target="_blank" rel="noopener noreferrer" style={{ color: B.gold, fontWeight: 600, textDecoration: "none" }}>Learn more →</a>
             </p>
           </div>
         </>

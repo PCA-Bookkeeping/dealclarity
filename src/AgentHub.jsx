@@ -728,12 +728,12 @@ export default function AgentHub({ t, isPro, setShowPro, user }) {
         ))}
       </div>
 
-      {/* Tab Content */}
-      {tab === "commissions" && <CommissionTracker isPro={isPro} setShowPro={setShowPro} currency={currency} />}
-      {tab === "tax" && <TaxPlanner isPro={isPro} setShowPro={setShowPro} currency={currency} />}
-      {tab === "netsheet" && <ListingNetSheet isPro={isPro} setShowPro={setShowPro} currency={currency} />}
-      {tab === "marketing" && <MarketingROI isPro={isPro} setShowPro={setShowPro} currency={currency} />}
-      {tab === "team" && <TeamDashboard isPro={isPro} setShowPro={setShowPro} currency={currency} />}
+      {/* Tab Content — all tabs stay mounted so data persists when switching */}
+      <div style={{ display: tab === "commissions" ? "block" : "none" }}><CommissionTracker isPro={isPro} setShowPro={setShowPro} currency={currency} /></div>
+      <div style={{ display: tab === "tax" ? "block" : "none" }}><TaxPlanner isPro={isPro} setShowPro={setShowPro} currency={currency} /></div>
+      <div style={{ display: tab === "netsheet" ? "block" : "none" }}><ListingNetSheet isPro={isPro} setShowPro={setShowPro} currency={currency} /></div>
+      <div style={{ display: tab === "marketing" ? "block" : "none" }}><MarketingROI isPro={isPro} setShowPro={setShowPro} currency={currency} /></div>
+      <div style={{ display: tab === "team" ? "block" : "none" }}><TeamDashboard isPro={isPro} setShowPro={setShowPro} currency={currency} /></div>
     </div>
   );
 }

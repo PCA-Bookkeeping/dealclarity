@@ -25,25 +25,69 @@ const PIE_C = [B.pri, B.acc, B.gold, B.blue, B.red, B.purple, "#EA580C", "#0D948
 const fmt = (n) => n == null || isNaN(n) ? "$0" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
 const fp = (n) => n == null || isNaN(n) ? "0%" : `${n.toFixed(1)}%`;
 
-// ── Category engine ──
+// ── Category engine (Profit Clarity COA for RE Operators + Agent/Broker categories) ──
 const CATEGORIES = {
-  revenue: { label: "Revenue", color: B.grn, keywords: ["rent", "income", "revenue", "lease", "tenant", "collected", "late fee", "application fee", "pet fee", "parking", "laundry", "storage fee", "utility reimburse", "other income", "deposit forfeit"] },
-  mortgage: { label: "Mortgage / Debt Service", color: B.pri, keywords: ["mortgage", "loan", "principal", "interest", "debt service", "note payable", "heloc", "line of credit"] },
-  taxes: { label: "Taxes & Insurance", color: B.red, keywords: ["tax", "property tax", "insurance", "hazard", "liability", "flood insurance", "umbrella"] },
-  repairs: { label: "Repairs & Maintenance", color: "#EA580C", keywords: ["repair", "maintenance", "plumbing", "electrical", "hvac", "roof", "appliance", "landscap", "snow", "pest", "cleaning", "turnover", "make ready", "paint"] },
-  management: { label: "Property Management", color: B.purple, keywords: ["management", "manager", "leasing", "property mgmt", "pm fee", "eviction", "legal", "attorney", "court"] },
-  utilities: { label: "Utilities", color: B.blue, keywords: ["utility", "utilities", "water", "sewer", "electric", "gas", "trash", "internet", "cable", "phone"] },
-  capex: { label: "Capital Expenditures", color: B.gold, keywords: ["capital", "capex", "improvement", "renovation", "remodel", "addition", "new roof", "new hvac", "flooring", "replacement"] },
-  admin: { label: "Administrative / Other", color: B.mut, keywords: ["admin", "office", "software", "bookkeeping", "accounting", "travel", "mileage", "advertising", "marketing", "misc", "bank fee", "license", "permit", "hoa", "association", "dues"] },
+  revenue: { label: "Revenue / Income", color: B.grn, keywords: [
+    "rent", "income", "revenue", "lease", "tenant", "collected", "late fee", "application fee",
+    "pet fee", "parking", "laundry", "storage fee", "utility reimburse", "other income",
+    "deposit forfeit", "gross rent", "flip sale", "wholesale revenue", "lot sale", "land sale",
+    "property sales", "commission", "referral", "bonus", "consulting", "service fee",
+    "coaching", "course", "sales", "proceeds", "received", "earned", "billable",
+  ]},
+  acquisition: { label: "Acquisition Costs", color: "#0D9488", keywords: [
+    "purchase price", "acquisition", "closing cost", "buy side", "inspection", "appraisal",
+    "survey", "environmental", "title", "attorney", "recording", "transfer tax", "due diligence",
+    "earnest money", "down payment",
+  ]},
+  improvement: { label: "Improvement / Rehab", color: "#EA580C", keywords: [
+    "contractor", "labor", "materials", "permits", "design", "architect", "change order",
+    "rehab", "renovation", "remodel", "construction", "flooring", "cabinet", "countertop",
+    "demolition", "framing", "drywall", "fixture", "appliance", "lumber",
+  ]},
+  holding: { label: "Holding Costs", color: B.gold, keywords: [
+    "holding", "property tax", "insurance", "utilities", "hoa", "condo fee",
+    "lawn", "maintenance", "pest", "security", "loan interest", "monthly interest",
+    "builders risk", "vacancy insurance",
+  ]},
+  disposition: { label: "Disposition / Selling", color: B.purple, keywords: [
+    "realtor", "agent commission", "listing", "staging", "photography", "buyer credit",
+    "concession", "sell side", "closing cost sell", "marketing material",
+  ]},
+  financing: { label: "Financing / Debt Service", color: B.pri, keywords: [
+    "mortgage", "loan", "principal", "interest", "debt service", "note payable", "heloc",
+    "line of credit", "origination", "points", "processing", "underwriting", "extension",
+    "refinance", "hard money", "bridge loan", "payment",
+  ]},
+  management: { label: "Property Management", color: "#7C3AED", keywords: [
+    "management fee", "manager", "leasing commission", "property mgmt", "pm fee",
+    "turnover", "make ready", "tenant placement",
+  ]},
+  repairs: { label: "Repairs & Maintenance", color: "#DC2626", keywords: [
+    "repair", "maintenance", "plumbing", "electrical", "hvac", "roof", "appliance",
+    "landscap", "snow", "pest", "cleaning", "paint", "carpet",
+  ]},
+  utilities: { label: "Utilities", color: B.blue, keywords: [
+    "utility", "utilities", "water", "sewer", "electric", "gas", "trash",
+    "internet", "cable", "phone",
+  ]},
+  operating: { label: "Business Operating", color: B.acc, keywords: [
+    "accounting", "bookkeeping", "cpa", "legal", "attorney", "software", "subscription",
+    "quickbooks", "crm", "office", "supplies", "equipment", "insurance", "liability",
+    "e&o", "umbrella", "marketing", "advertising", "website", "lead gen", "direct mail",
+    "vehicle", "travel", "mileage", "fuel", "professional development", "course", "coaching",
+    "conference", "bank fee", "license", "permit", "association", "dues",
+    "admin", "misc", "general", "other expense", "payroll", "wage", "salary", "contractor",
+    "rent expense", "office rent",
+  ]},
 };
 
 function categorize(desc) {
-  if (!desc) return "admin";
+  if (!desc) return "operating";
   const lower = desc.toLowerCase();
   for (const [cat, def] of Object.entries(CATEGORIES)) {
     if (def.keywords.some(kw => lower.includes(kw))) return cat;
   }
-  return "admin";
+  return "operating";
 }
 
 function parseAmount(val) {
@@ -79,7 +123,9 @@ export default function PLReader({ isPro, setShowPro }) {
   const [filterCat, setFilterCat] = useState("all");
   const [filterProp, setFilterProp] = useState("all");
   const [expandedInsight, setExpandedInsight] = useState(null);
+  const [dragging, setDragging] = useState(false);
   const fileRef = useRef(null);
+  const dropRef = useRef(null);
 
   // Pro gate
   if (!isPro) return (
@@ -91,11 +137,12 @@ export default function PLReader({ isPro, setShowPro }) {
     </div>
   );
 
-  const handleFile = useCallback((e) => {
-    const file = e.target.files?.[0];
+  const processFile = useCallback((file) => {
     if (!file) return;
     setFileName(file.name);
     setOverrides({});
+    setFilterCat("all");
+    setFilterProp("all");
 
     const reader = new FileReader();
     reader.onload = (evt) => {
@@ -173,6 +220,25 @@ export default function PLReader({ isPro, setShowPro }) {
       reader.readAsArrayBuffer(file);
     }
   }, []);
+
+  // Wrapper for file input
+  const handleFile = useCallback((e) => {
+    const file = e.target.files?.[0];
+    processFile(file);
+  }, [processFile]);
+
+  // Drag and drop handlers
+  const handleDragOver = useCallback((e) => { e.preventDefault(); e.stopPropagation(); setDragging(true); }, []);
+  const handleDragLeave = useCallback((e) => { e.preventDefault(); e.stopPropagation(); setDragging(false); }, []);
+  const handleDrop = useCallback((e) => {
+    e.preventDefault(); e.stopPropagation(); setDragging(false);
+    const file = e.dataTransfer?.files?.[0];
+    if (file && (file.name.endsWith(".csv") || file.name.endsWith(".tsv") || file.name.endsWith(".xlsx") || file.name.endsWith(".xls"))) {
+      processFile(file);
+    } else {
+      alert("Please drop a CSV, TSV, or XLSX file.");
+    }
+  }, [processFile]);
 
   // Apply overrides
   const data = useMemo(() => rows.map((r, i) => ({
@@ -295,13 +361,17 @@ export default function PLReader({ isPro, setShowPro }) {
           DealClarity auto-categorizes every line item and shows you exactly where your money goes.
         </p>
         <div
+          ref={dropRef}
           onClick={() => fileRef.current?.click()}
-          className="mx-auto p-8 rounded-2xl border-2 border-dashed cursor-pointer hover:opacity-80"
-          style={{ borderColor: B.gold, background: B.goldL, maxWidth: 400 }}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className="mx-auto p-8 rounded-2xl border-2 border-dashed cursor-pointer transition-all"
+          style={{ borderColor: dragging ? B.grn : B.gold, background: dragging ? B.grnL : B.goldL, maxWidth: 400, transform: dragging ? "scale(1.02)" : "scale(1)" }}
         >
-          <Upload size={32} style={{ color: B.gold, margin: "0 auto 8px" }} />
-          <p className="text-sm font-semibold" style={{ color: B.pri }}>Drop CSV or XLSX here</p>
-          <p className="text-xs mt-1" style={{ color: B.mut }}>Supports QuickBooks, Stessa, Buildium, AppFolio exports</p>
+          <Upload size={32} style={{ color: dragging ? B.grn : B.gold, margin: "0 auto 8px" }} />
+          <p className="text-sm font-semibold" style={{ color: B.pri }}>{dragging ? "Drop file here!" : "Click or drag CSV / XLSX here"}</p>
+          <p className="text-xs mt-1" style={{ color: B.mut }}>Supports QuickBooks, Stessa, Buildium, AppFolio, bank statements</p>
         </div>
         <input ref={fileRef} type="file" accept=".csv,.tsv,.xlsx,.xls" onChange={handleFile} className="hidden" />
       </div>
@@ -528,7 +598,7 @@ export default function PLReader({ isPro, setShowPro }) {
       {/* Book promo */}
       <div className="p-3 rounded-xl text-center" style={{ background: B.bg, border: `1px solid ${B.brd}` }}>
         <p className="text-xs" style={{ color: B.mut }}>
-          Want to master reading P&Ls for real estate? Check out <a href="https://amazon.com" target="_blank" rel="noopener noreferrer" className="font-semibold underline" style={{ color: B.gold }}>"The Books Don't Lie"</a> on Amazon.
+          Want to master reading P&Ls for real estate? Check out <a href="https://www.amazon.com/dp/B0GPXXDQP2" target="_blank" rel="noopener noreferrer" className="font-semibold underline" style={{ color: B.gold }}>"The Books Don't Lie"</a> on Amazon.
         </p>
       </div>
     </div>

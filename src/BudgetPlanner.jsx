@@ -13,7 +13,8 @@ import {
   DollarSign, TrendingUp, PiggyBank, Plus, Trash2, ChevronDown,
   ChevronUp, BarChart3, List, LayoutDashboard, CreditCard,
   AlertTriangle, Check, ArrowUpRight, ArrowDownRight, Target,
-  Calendar, Edit2, X, Save, Zap
+  Calendar, Edit2, X, Save, Zap, Flame, ToggleLeft, ToggleRight,
+  ArrowRight, Clock, Percent, Shield
 } from "lucide-react";
 
 // ── Brand (matches DealClarity)
@@ -616,12 +617,17 @@ function DashboardTab({ budgetData, transactions, year }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// TAB 4: DEBT SNOWBALL
+// TAB 4: DEBT SNOWBALL (ADVANCED — per-debt extra payment targeting)
 // ═══════════════════════════════════════════════════════════════
 function DebtSnowballTab({ debts, setDebts }) {
   const [extra, setExtra] = useState(100);
+  const [extraInput, setExtraInput] = useState("100");
   const [form, setForm] = useState({ name: "", balance: "", minPayment: "", interestRate: "" });
   const [showForm, setShowForm] = useState(false);
+  // Strategy: "snowball" (smallest first), "avalanche" (highest interest first), "custom" (user picks targets)
+  const [strategy, setStrategy] = useState("snowball");
+  // For custom strategy: map of debtId -> extra $ amount assigned to that debt
+  const [customAlloc, setCustomAlloc] = useState({});
 
   const addDebt = () => {
     if (!form.name || !form.balance) return;
@@ -630,24 +636,55 @@ function DebtSnowballTab({ debts, setDebts }) {
     setShowForm(false);
   };
 
-  // Snowball calculation — smallest balance first
+  // How much of the extra is allocated in custom mode
+  const customAllocTotal = Object.values(customAlloc).reduce((a, b) => a + (parseFloat(b) || 0), 0);
+  const customUnallocated = Math.max(0, extra - customAllocTotal);
+
+  const updateCustomAlloc = (debtId, val) => {
+    setCustomAlloc(p => ({ ...p, [debtId]: parseFloat(val) || 0 }));
+  };
+
+  // Distribute extra evenly across selected debts
+  const distributeEvenly = () => {
+    const activeDebts = debts.filter(d => d.balance > 0);
+    if (!activeDebts.length) return;
+    const each = Math.floor(extra / activeDebts.length);
+    const remainder = extra - each * activeDebts.length;
+    const alloc = {};
+    activeDebts.forEach((d, i) => { alloc[d.id] = each + (i === 0 ? remainder : 0); });
+    setCustomAlloc(alloc);
+  };
+
+  // Put all extra on a single debt
+  const focusOnDebt = (debtId) => {
+    const alloc = {};
+    debts.forEach(d => { alloc[d.id] = d.id === debtId ? extra : 0; });
+    setCustomAlloc(alloc);
+  };
+
+  // Snowball / Avalanche / Custom calculation
   const snowball = useMemo(() => {
-    if (!debts.length) return [];
-    let debtsCopy = debts.map(d => ({ ...d, remaining: d.balance })).sort((a, b) => a.remaining - b.remaining);
+    if (!debts.length) return { schedule: [], debtsCopy: [], totalInterestPaid: 0 };
+    let debtsCopy = debts.map(d => ({ ...d, remaining: d.balance, totalInterestPaid: 0 }));
+
+    // Sort order depends on strategy
+    if (strategy === "snowball") debtsCopy.sort((a, b) => a.remaining - b.remaining);
+    else if (strategy === "avalanche") debtsCopy.sort((a, b) => b.interestRate - a.interestRate);
+    // custom: no sort, user controls allocation
+
     const schedule = [];
     let month = 0;
-    let availableExtra = extra;
     const maxMonths = 360;
 
-    while (debtsCopy.some(d => d.remaining > 0) && month < maxMonths) {
+    while (debtsCopy.some(d => d.remaining > 0.01) && month < maxMonths) {
       month++;
-      let snowballAmt = availableExtra;
 
       // Apply interest
       debtsCopy = debtsCopy.map(d => {
         if (d.remaining <= 0) return d;
         const monthlyRate = d.interestRate / 100 / 12;
-        return { ...d, remaining: d.remaining * (1 + monthlyRate) };
+        const interest = d.remaining * monthlyRate;
+        return { ...d, remaining: d.remaining + interest, totalInterestPaid: d.totalInterestPaid + interest };
       });
 
       // Pay minimums first
@@ -657,64 +694,208 @@ function DebtSnowballTab({ debts, setDebts }) {
         return { ...d, remaining: Math.max(0, d.remaining - pay) };
       });
 
-      // Snowball extra to first active debt
-      for (let i = 0; i < debtsCopy.length; i++) {
-        if (debtsCopy[i].remaining > 0) {
-          const extra_pay = Math.min(snowballAmt, debtsCopy[i].remaining);
-          debtsCopy[i] = { ...debtsCopy[i], remaining: Math.max(0, debtsCopy[i].remaining - extra_pay) };
-          snowballAmt -= extra_pay;
-          if (debtsCopy[i].remaining <= 0 && snowballAmt === 0) {
-            snowballAmt = 0;
+      // Apply extra payment based on strategy
+      if (strategy === "custom") {
+        // Custom: apply each debt's allocated extra
+        let leftover = 0;
+        debtsCopy = debtsCopy.map(d => {
+          if (d.remaining <= 0) return d;
+          const alloc = parseFloat(customAlloc[d.id]) || 0;
+          const pay = Math.min(alloc, d.remaining);
+          leftover += alloc - pay;
+          return { ...d, remaining: Math.max(0, d.remaining - pay) };
+        });
+        // Any unallocated extra + leftover goes to smallest remaining
+        let unalloc = customUnallocated + leftover;
+        for (let i = 0; i < debtsCopy.length && unalloc > 0.01; i++) {
+          const sorted = [...debtsCopy].filter(d => d.remaining > 0).sort((a, b) => a.remaining - b.remaining);
+          if (sorted.length === 0) break;
+          const target = sorted[0];
+          const idx = debtsCopy.findIndex(d => d.id === target.id);
+          const pay = Math.min(unalloc, debtsCopy[idx].remaining);
+          debtsCopy[idx] = { ...debtsCopy[idx], remaining: Math.max(0, debtsCopy[idx].remaining - pay) };
+          unalloc -= pay;
+        }
+      } else {
+        // Snowball or Avalanche: extra goes to first active debt in sorted order
+        let snowballAmt = extra;
+        // Also add freed-up minimums from paid-off debts in previous iterations
+        for (let i = 0; i < debtsCopy.length && snowballAmt > 0.01; i++) {
+          if (debtsCopy[i].remaining > 0) {
+            const pay = Math.min(snowballAmt, debtsCopy[i].remaining);
+            debtsCopy[i] = { ...debtsCopy[i], remaining: Math.max(0, debtsCopy[i].remaining - pay) };
+            snowballAmt -= pay;
+            if (debtsCopy[i].remaining > 0) break; // If debt not fully paid, stop
           }
-          break;
         }
       }
 
-      // Check if any debt just paid off — add its min to snowball
+      // Mark paid-off debts
       debtsCopy = debtsCopy.map(d => {
-        if (d.remaining <= 0 && !d.paidOffMonth) {
-          snowballAmt += d.minPayment;
-          return { ...d, paidOffMonth: month };
+        if (d.remaining <= 0.01 && !d.paidOffMonth) {
+          return { ...d, remaining: 0, paidOffMonth: month };
         }
         return d;
       });
 
-      schedule.push({ month, debts: debtsCopy.map(d => ({ id: d.id, remaining: Math.max(0, d.remaining) })) });
+      schedule.push({ month, debts: debtsCopy.map(d => ({ id: d.id, name: d.name, remaining: Math.max(0, d.remaining) })) });
     }
 
-    return { schedule, debtsCopy };
-  }, [debts, extra]);
+    const totalInterestPaid = debtsCopy.reduce((a, d) => a + d.totalInterestPaid, 0);
+    return { schedule, debtsCopy, totalInterestPaid };
+  }, [debts, extra, strategy, customAlloc, customUnallocated]);
+
+  // Calculate min-only scenario for comparison
+  const minOnlyMonths = useMemo(() => {
+    if (!debts.length) return 0;
+    let dc = debts.map(d => ({ ...d, remaining: d.balance }));
+    let m = 0;
+    while (dc.some(d => d.remaining > 0.01) && m < 600) {
+      m++;
+      dc = dc.map(d => {
+        if (d.remaining <= 0) return d;
+        const interest = d.remaining * (d.interestRate / 100 / 12);
+        const afterInterest = d.remaining + interest;
+        return { ...d, remaining: Math.max(0, afterInterest - d.minPayment) };
+      });
+    }
+    return m;
+  }, [debts]);
 
   const totalDebt = debts.reduce((a, d) => a + d.balance, 0);
   const minTotal = debts.reduce((a, d) => a + d.minPayment, 0);
   const payoffMonth = snowball.schedule ? snowball.schedule.length : 0;
   const payoffDate = new Date();
   payoffDate.setMonth(payoffDate.getMonth() + payoffMonth);
+  const monthsSaved = minOnlyMonths - payoffMonth;
+  const strategyLabel = strategy === "snowball" ? "Smallest First" : strategy === "avalanche" ? "Highest Interest First" : "Custom Targeting";
 
   return (
     <div className="space-y-4">
       {/* Summary */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <KPI icon={CreditCard} label="Total Debt" value={fmt(totalDebt)} color={B.red} bg={B.redL} />
         <KPI icon={DollarSign} label="Min Payments" value={fmt(minTotal)} sub="/month" color={B.gold} />
-        <KPI icon={Zap} label="With Snowball" value={fmt(minTotal + extra)} sub="/month" color={B.blue} />
-        <KPI icon={Target} label="Debt Free" value={payoffMonth > 0 ? payoffDate.toLocaleDateString("en-US", { month: "short", year: "numeric" }) : "—"} sub={payoffMonth > 0 ? `${payoffMonth} months` : "Add debts"} color={B.grn} bg={B.grnL} />
+        <KPI icon={Zap} label="Total Payment" value={fmt(minTotal + extra)} sub="/month" color={B.blue} />
+        <KPI icon={Target} label="Debt Free" value={payoffMonth > 0 ? payoffDate.toLocaleDateString("en-US", { month: "short", year: "numeric" }) : "--"} sub={payoffMonth > 0 ? `${payoffMonth} months` : "Add debts"} color={B.grn} bg={B.grnL} />
+        <KPI icon={Clock} label="Months Saved" value={monthsSaved > 0 ? `${monthsSaved}` : "--"} sub={monthsSaved > 0 ? "vs min-only" : ""} color={B.blue} bg={B.blueL} />
       </div>
 
-      {/* Extra payment slider */}
+      {/* Interest saved callout */}
+      {snowball.totalInterestPaid > 0 && (
+        <div className="rounded-xl p-3 flex items-center gap-3" style={{ background: "#FFF7ED", border: `1.5px solid ${B.gold}` }}>
+          <Percent size={18} style={{ color: B.gold }} />
+          <div>
+            <span className="text-sm font-semibold" style={{ color: B.goldD }}>Total interest you'll pay: </span>
+            <span className="text-sm font-bold" style={{ color: B.red }}>{fmt(snowball.totalInterestPaid)}</span>
+            <span className="text-xs ml-2" style={{ color: B.mut }}>Strategy: {strategyLabel}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Strategy selector */}
       <Card>
         <div className="p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Shield size={15} style={{ color: B.pri }} />
+            <label className="text-sm font-semibold" style={{ color: B.pri }}>Payoff Strategy</label>
+          </div>
+          <div className="grid grid-cols-3 gap-2 mb-4">
+            {[
+              { id: "snowball", label: "Snowball", desc: "Smallest balance first — quick wins build momentum" },
+              { id: "avalanche", label: "Avalanche", desc: "Highest interest first — saves the most money" },
+              { id: "custom", label: "Custom", desc: "You choose which debts get the extra payment" },
+            ].map(s => (
+              <button key={s.id} onClick={() => setStrategy(s.id)}
+                className="rounded-xl p-3 text-left border-2 transition-all"
+                style={{ borderColor: strategy === s.id ? B.gold : B.brd, background: strategy === s.id ? B.goldL : "#fff" }}>
+                <div className="text-xs font-bold mb-0.5" style={{ color: strategy === s.id ? B.goldD : B.pri }}>{s.label}</div>
+                <div className="text-xs leading-snug" style={{ color: B.mut }}>{s.desc}</div>
+              </button>
+            ))}
+          </div>
+
+          {/* Extra payment amount */}
           <div className="flex items-center justify-between mb-3">
             <label className="text-sm font-semibold" style={{ color: B.pri }}>Monthly Extra Payment</label>
-            <span className="text-lg font-bold" style={{ color: B.blue }}>{fmt(extra)}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs" style={{ color: B.mut }}>$</span>
+              <input type="number" value={extraInput} min="0" step="50"
+                onChange={e => { setExtraInput(e.target.value); setExtra(Math.max(0, parseFloat(e.target.value) || 0)); }}
+                className="w-24 text-right text-lg font-bold px-2 py-1 rounded-lg border outline-none"
+                style={{ borderColor: B.blue, color: B.blue }}
+              />
+            </div>
           </div>
-          <input type="range" min="0" max="10000" step="50" value={extra} onChange={e => setExtra(Number(e.target.value))}
+          <input type="range" min="0" max="10000" step="50" value={extra}
+            onChange={e => { setExtra(Number(e.target.value)); setExtraInput(e.target.value); }}
             className="w-full" style={{ accentColor: B.blue }} />
           <div className="flex justify-between text-xs mt-1" style={{ color: B.mut }}>
             <span>$0</span><span>$2k</span><span>$4k</span><span>$6k</span><span>$8k</span><span>$10k</span>
           </div>
         </div>
       </Card>
+
+      {/* Custom allocation panel */}
+      {strategy === "custom" && debts.length > 0 && (
+        <Card>
+          <div className="px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: B.brd }}>
+            <div className="flex items-center gap-2">
+              <Target size={15} style={{ color: B.gold }} />
+              <span className="font-semibold text-sm" style={{ color: B.pri }}>Extra Payment Allocation</span>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={distributeEvenly} className="text-xs px-3 py-1 rounded-lg font-medium"
+                style={{ background: B.blueL, color: B.blue, border: `1px solid ${B.blue}` }}>
+                Split Evenly
+              </button>
+            </div>
+          </div>
+          <div className="p-4 space-y-3">
+            {/* Allocation bar */}
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs font-medium" style={{ color: B.mut }}>Budget:</span>
+              <span className="text-sm font-bold" style={{ color: B.blue }}>{fmt(extra)}</span>
+              <ArrowRight size={12} style={{ color: B.mut }} />
+              <span className="text-xs font-medium" style={{ color: B.mut }}>Allocated:</span>
+              <span className="text-sm font-bold" style={{ color: customAllocTotal <= extra ? B.grn : B.red }}>{fmt(customAllocTotal)}</span>
+              {customUnallocated > 0 && (
+                <>
+                  <ArrowRight size={12} style={{ color: B.mut }} />
+                  <span className="text-xs" style={{ color: B.gold }}>Unallocated: {fmt(customUnallocated)} (goes to smallest)</span>
+                </>
+              )}
+              {customAllocTotal > extra && (
+                <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: B.redL, color: B.red }}>
+                  Over by {fmt(customAllocTotal - extra)}!
+                </span>
+              )}
+            </div>
+
+            {debts.filter(d => d.balance > 0).map(debt => (
+              <div key={debt.id} className="flex items-center gap-3 p-2 rounded-lg" style={{ background: "#FAFBFC" }}>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-semibold" style={{ color: B.txt }}>{debt.name}</div>
+                  <div className="text-xs" style={{ color: B.mut }}>{fmt(debt.balance)} @ {debt.interestRate}%</div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs" style={{ color: B.mut }}>$</span>
+                  <input type="number" min="0" step="25" value={customAlloc[debt.id] || 0}
+                    onChange={e => updateCustomAlloc(debt.id, e.target.value)}
+                    className="w-20 text-right text-sm font-semibold px-2 py-1.5 rounded-lg border outline-none"
+                    style={{ borderColor: (customAlloc[debt.id] || 0) > 0 ? B.gold : B.brd, color: B.txt }} />
+                  <span className="text-xs" style={{ color: B.mut }}>/mo</span>
+                </div>
+                <button onClick={() => focusOnDebt(debt.id)}
+                  className="text-xs px-2 py-1 rounded font-medium whitespace-nowrap"
+                  style={{ background: B.goldL, color: B.goldD }}>
+                  Focus
+                </button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {/* Add debt */}
       <Card>
@@ -752,28 +933,36 @@ function DebtSnowballTab({ debts, setDebts }) {
         )}
       </Card>
 
-      {/* Debt list with payoff dates */}
+      {/* Debt list with payoff dates + per-debt extra */}
       {debts.length > 0 && (
         <Card>
           <div className="px-4 py-3 border-b" style={{ borderColor: B.brd }}>
-            <span className="font-semibold text-sm" style={{ color: B.pri }}>Snowball Payoff Order (Smallest First)</span>
+            <span className="font-semibold text-sm" style={{ color: B.pri }}>
+              Payoff Order ({strategyLabel})
+            </span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ background: "#F9FAFB", borderBottom: `1px solid ${B.brd}` }}>
-                  {["#","Debt","Balance","Min Payment","Interest","Payoff Month",""].map(h => (
+                  {["#","Debt","Balance","Min Payment","Interest","Extra/mo","Payoff",""].map(h => (
                     <th key={h} className="p-3 text-left text-xs font-semibold" style={{ color: B.mut }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {[...debts].sort((a, b) => a.balance - b.balance).map((debt, i) => {
+                {(() => {
+                  let sorted = [...debts];
+                  if (strategy === "snowball") sorted.sort((a, b) => a.balance - b.balance);
+                  else if (strategy === "avalanche") sorted.sort((a, b) => b.interestRate - a.interestRate);
+                  return sorted;
+                })().map((debt, i) => {
                   const paidOffMonth = snowball.debtsCopy?.find(d => d.id === debt.id)?.paidOffMonth;
                   const pDate = paidOffMonth ? new Date() : null;
                   if (pDate) pDate.setMonth(pDate.getMonth() + paidOffMonth);
+                  const debtExtra = strategy === "custom" ? (customAlloc[debt.id] || 0) : (i === 0 ? extra : 0);
                   return (
-                    <tr key={debt.id} style={{ borderBottom: `1px solid ${B.brd}` }}>
+                    <tr key={debt.id} style={{ borderBottom: `1px solid ${B.brd}`, background: i === 0 && strategy !== "custom" ? "#FFFBF0" : "transparent" }}>
                       <td className="p-3">
                         <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white" style={{ background: PIE_C[i % PIE_C.length] }}>{i + 1}</span>
                       </td>
@@ -782,11 +971,18 @@ function DebtSnowballTab({ debts, setDebts }) {
                       <td className="p-3" style={{ color: B.txt }}>{fmt(debt.minPayment)}/mo</td>
                       <td className="p-3" style={{ color: B.mut }}>{debt.interestRate}%</td>
                       <td className="p-3">
+                        {debtExtra > 0 ? (
+                          <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: B.blueL, color: B.blue }}>
+                            +{fmt(debtExtra)}
+                          </span>
+                        ) : <span className="text-xs" style={{ color: B.mut }}>--</span>}
+                      </td>
+                      <td className="p-3">
                         {paidOffMonth ? (
                           <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: B.grnL, color: B.grn }}>
                             {pDate.toLocaleDateString("en-US", { month: "short", year: "numeric" })}
                           </span>
-                        ) : "—"}
+                        ) : "--"}
                       </td>
                       <td className="p-3">
                         <button onClick={() => setDebts(p => p.filter(d => d.id !== debt.id))}
@@ -809,16 +1005,20 @@ function DebtSnowballTab({ debts, setDebts }) {
           <div className="px-4 py-3 border-b" style={{ borderColor: B.brd }}>
             <span className="font-semibold text-sm" style={{ color: B.pri }}>Remaining Balance Over Time</span>
           </div>
-          <div className="p-4" style={{ height: 220 }}>
+          <div className="p-4" style={{ height: 250 }}>
             <ResponsiveContainer>
               <AreaChart
-                data={snowball.schedule.filter((_, i) => i % Math.max(1, Math.floor(snowball.schedule.length / 24)) === 0)}
+                data={snowball.schedule.filter((_, i) => i % Math.max(1, Math.floor(snowball.schedule.length / 30)) === 0)}
                 margin={{ left: 5, right: 5 }}>
                 <XAxis dataKey="month" tick={{ fontSize: 10 }} label={{ value: "Month", position: "insideBottom", offset: -2, fontSize: 10 }} />
                 <YAxis tickFormatter={v => `$${(v/1000).toFixed(0)}k`} tick={{ fontSize: 10 }} />
                 <Tooltip formatter={v => fmt(v)} labelFormatter={v => `Month ${v}`} />
-                <Area type="monotone" dataKey={(d) => d.debts.reduce((a, dd) => a + dd.remaining, 0)}
-                  name="Total Remaining" stroke={B.red} fill={B.redL} strokeWidth={2} />
+                <Legend wrapperStyle={{ fontSize: 10 }} />
+                {debts.map((d, i) => (
+                  <Area key={d.id} type="monotone" stackId="1"
+                    dataKey={(row) => row.debts.find(dd => dd.id === d.id)?.remaining || 0}
+                    name={d.name} stroke={PIE_C[i % PIE_C.length]} fill={PIE_C[i % PIE_C.length]} fillOpacity={0.3} strokeWidth={1.5} />
+                ))}
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -828,8 +1028,8 @@ function DebtSnowballTab({ debts, setDebts }) {
       {debts.length === 0 && (
         <div className="text-center py-12" style={{ color: B.mut }}>
           <CreditCard size={40} style={{ margin: "0 auto 8px", opacity: 0.3 }} />
-          <p className="text-sm">Add your debts above to see the snowball payoff plan.</p>
-          <p className="text-xs mt-1">Smallest balance paid off first — the extra payment rolls to the next one.</p>
+          <p className="text-sm">Add your debts above to see your payoff plan.</p>
+          <p className="text-xs mt-1">Choose Snowball, Avalanche, or Custom targeting for your extra payments.</p>
         </div>
       )}
     </div>
@@ -839,6 +1039,330 @@ function DebtSnowballTab({ debts, setDebts }) {
 // ═══════════════════════════════════════════════════════════════
 // TAB 5: SAVINGS GOALS
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// TAB 6: BURN RATE CALCULATOR
+// Based on Fabian's article "Financial Burn Rate"
+// ═══════════════════════════════════════════════════════════════
+function BurnRateTab() {
+  const [mode, setMode] = useState("personal"); // personal | business
+  const [months, setMonths] = useState([
+    { id: uid(), label: "Month 1", bankOut: "", creditOut: "", otherOut: "", income: "" },
+    { id: uid(), label: "Month 2", bankOut: "", creditOut: "", otherOut: "", income: "" },
+    { id: uid(), label: "Month 3", bankOut: "", creditOut: "", otherOut: "", income: "" },
+  ]);
+  // Leak tracker categories
+  const [leaks, setLeaks] = useState([
+    { id: uid(), name: "Subscriptions & Memberships", amount: "" },
+    { id: uid(), name: "Dining Out / Delivery", amount: "" },
+    { id: uid(), name: "Convenience Charges / Fees", amount: "" },
+    { id: uid(), name: "Unused Services", amount: "" },
+    { id: uid(), name: "Impulse Purchases", amount: "" },
+  ]);
+  const [showLeaks, setShowLeaks] = useState(false);
+
+  const updateMonth = (id, field, val) => {
+    setMonths(p => p.map(m => m.id === id ? { ...m, [field]: val } : m));
+  };
+  const addMonth = () => {
+    setMonths(p => [...p, { id: uid(), label: `Month ${p.length + 1}`, bankOut: "", creditOut: "", otherOut: "", income: "" }]);
+  };
+  const removeMonth = (id) => {
+    if (months.length <= 1) return;
+    setMonths(p => p.filter(m => m.id !== id));
+  };
+
+  // Calculations
+  const monthTotals = months.map(m => {
+    const out = (parseFloat(m.bankOut) || 0) + (parseFloat(m.creditOut) || 0) + (parseFloat(m.otherOut) || 0);
+    const inc = parseFloat(m.income) || 0;
+    return { ...m, totalOut: out, income: inc, net: inc - out };
+  });
+
+  const validMonths = monthTotals.filter(m => m.totalOut > 0);
+  const avgBurnRate = validMonths.length > 0 ? validMonths.reduce((a, m) => a + m.totalOut, 0) / validMonths.length : 0;
+  const avgIncome = validMonths.length > 0 ? validMonths.reduce((a, m) => a + m.income, 0) / validMonths.length : 0;
+  const burnRatio = avgIncome > 0 ? (avgBurnRate / avgIncome) * 100 : 0;
+  const monthlySurplus = avgIncome - avgBurnRate;
+  const annualBurn = avgBurnRate * 12;
+
+  // Leak totals
+  const totalLeaks = leaks.reduce((a, l) => a + (parseFloat(l.amount) || 0), 0);
+  const leakPercent = avgBurnRate > 0 ? (totalLeaks / avgBurnRate) * 100 : 0;
+
+  // Health rating
+  const getHealthRating = () => {
+    if (burnRatio === 0) return { label: "Enter data", color: B.mut, bg: "#F3F4F6" };
+    if (burnRatio <= 50) return { label: "Excellent", color: B.grn, bg: B.grnL };
+    if (burnRatio <= 70) return { label: "Healthy", color: B.blue, bg: B.blueL };
+    if (burnRatio <= 85) return { label: "Tight", color: B.gold, bg: B.goldL };
+    if (burnRatio <= 100) return { label: "Danger Zone", color: "#EA580C", bg: "#FFF7ED" };
+    return { label: "Bleeding Cash", color: B.red, bg: B.redL };
+  };
+  const health = getHealthRating();
+
+  // Pie data for burn breakdown
+  const burnPie = validMonths.length > 0 ? [
+    { name: "Bank Outflows", value: validMonths.reduce((a, m) => a + (parseFloat(m.bankOut) || 0), 0) / validMonths.length },
+    { name: "Credit Card", value: validMonths.reduce((a, m) => a + (parseFloat(m.creditOut) || 0), 0) / validMonths.length },
+    { name: "Other", value: validMonths.reduce((a, m) => a + (parseFloat(m.otherOut) || 0), 0) / validMonths.length },
+  ].filter(d => d.value > 0) : [];
+
+  // Trend data
+  const trendData = monthTotals.map((m, i) => ({
+    month: m.label,
+    outflows: m.totalOut,
+    income: parseFloat(months[i].income) || 0,
+  }));
+
+  return (
+    <div className="space-y-4">
+      {/* Mode toggle */}
+      <div className="flex items-center gap-3">
+        <button onClick={() => setMode("personal")}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all"
+          style={{ background: mode === "personal" ? B.pri : "#F3F4F6", color: mode === "personal" ? "#fff" : B.mut }}>
+          <DollarSign size={13} /> Personal Burn Rate
+        </button>
+        <button onClick={() => setMode("business")}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all"
+          style={{ background: mode === "business" ? B.pri : "#F3F4F6", color: mode === "business" ? "#fff" : B.mut }}>
+          <BarChart3 size={13} /> Business Burn Rate
+        </button>
+      </div>
+
+      {/* Explanation */}
+      <div className="rounded-xl p-3" style={{ background: "#F0F9FF", border: `1px solid ${B.blue}` }}>
+        <div className="flex items-start gap-2">
+          <Flame size={16} style={{ color: "#EA580C", marginTop: 2 }} />
+          <div>
+            <div className="text-sm font-semibold mb-0.5" style={{ color: B.pri }}>
+              {mode === "personal" ? "Your Personal Burn Rate" : "Your Business Burn Rate"}
+            </div>
+            <div className="text-xs leading-relaxed" style={{ color: B.mut }}>
+              {mode === "personal"
+                ? "Your burn rate is the total amount of money that leaves your life every single month. Pull 3 months of bank statements + credit card statements. Add up every outflow. Divide by 3. That's your monthly burn rate."
+                : "Your business burn rate is total monthly operating expenses. Track all outflows: payroll, rent, software, marketing, supplies. This tells you how long your cash reserves will last."}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <KPI icon={Flame} label="Monthly Burn" value={fmt(avgBurnRate)} color="#EA580C" bg="#FFF7ED" />
+        <KPI icon={TrendingUp} label="Monthly Income" value={fmt(avgIncome)} color={B.grn} bg={B.grnL} />
+        <KPI icon={DollarSign} label={monthlySurplus >= 0 ? "Surplus" : "Deficit"} value={fmt(Math.abs(monthlySurplus))} color={monthlySurplus >= 0 ? B.grn : B.red} bg={monthlySurplus >= 0 ? B.grnL : B.redL} />
+        <KPI icon={Calendar} label="Annual Burn" value={fmt(annualBurn)} color={B.pri} />
+        <div className="rounded-xl p-4 border text-center" style={{ borderColor: health.color, background: health.bg }}>
+          <div className="text-xs font-medium mb-1" style={{ color: B.mut }}>Health</div>
+          <div className="text-xl font-bold" style={{ color: health.color }}>{burnRatio > 0 ? `${burnRatio.toFixed(0)}%` : "--"}</div>
+          <div className="text-xs font-semibold" style={{ color: health.color }}>{health.label}</div>
+        </div>
+      </div>
+
+      {/* Monthly data entry */}
+      <Card>
+        <div className="px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: B.brd }}>
+          <div className="flex items-center gap-2">
+            <Calendar size={15} style={{ color: B.pri }} />
+            <span className="font-semibold text-sm" style={{ color: B.pri }}>Monthly Outflows (3+ months recommended)</span>
+          </div>
+          <button onClick={addMonth} className="flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-lg"
+            style={{ background: B.goldL, color: B.goldD, border: `1px solid ${B.gold}` }}>
+            <Plus size={12} /> Add Month
+          </button>
+        </div>
+        <div className="p-4 space-y-3">
+          {months.map((m, i) => (
+            <div key={m.id} className="grid grid-cols-5 gap-2 items-end p-2 rounded-lg" style={{ background: i % 2 === 0 ? "#FAFBFC" : "#fff" }}>
+              <div>
+                <label className="text-xs font-medium block mb-1" style={{ color: B.mut }}>
+                  {mode === "personal" ? "Bank Outflows" : "Operating Expenses"}
+                </label>
+                <input type="number" placeholder="0" value={m.bankOut}
+                  onChange={e => updateMonth(m.id, "bankOut", e.target.value)}
+                  className="w-full px-2 py-1.5 rounded-lg border text-sm outline-none" style={{ borderColor: B.brd }} />
+              </div>
+              <div>
+                <label className="text-xs font-medium block mb-1" style={{ color: B.mut }}>
+                  {mode === "personal" ? "Credit Card" : "Payroll / Contractors"}
+                </label>
+                <input type="number" placeholder="0" value={m.creditOut}
+                  onChange={e => updateMonth(m.id, "creditOut", e.target.value)}
+                  className="w-full px-2 py-1.5 rounded-lg border text-sm outline-none" style={{ borderColor: B.brd }} />
+              </div>
+              <div>
+                <label className="text-xs font-medium block mb-1" style={{ color: B.mut }}>Other Outflows</label>
+                <input type="number" placeholder="0" value={m.otherOut}
+                  onChange={e => updateMonth(m.id, "otherOut", e.target.value)}
+                  className="w-full px-2 py-1.5 rounded-lg border text-sm outline-none" style={{ borderColor: B.brd }} />
+              </div>
+              <div>
+                <label className="text-xs font-medium block mb-1" style={{ color: B.mut }}>
+                  {mode === "personal" ? "Take-Home Pay" : "Revenue"}
+                </label>
+                <input type="number" placeholder="0" value={months[i].income}
+                  onChange={e => updateMonth(m.id, "income", e.target.value)}
+                  className="w-full px-2 py-1.5 rounded-lg border text-sm outline-none" style={{ borderColor: B.brd }} />
+              </div>
+              <div className="flex items-end gap-1">
+                <div className="text-xs font-bold py-2" style={{ color: monthTotals[i].net >= 0 ? B.grn : B.red }}>
+                  {monthTotals[i].totalOut > 0 ? (monthTotals[i].net >= 0 ? "+" : "") + fmt(monthTotals[i].net) : "--"}
+                </div>
+                {months.length > 1 && (
+                  <button onClick={() => removeMonth(m.id)} className="p-1 rounded hover:bg-red-50 opacity-40 hover:opacity-100 mb-1">
+                    <Trash2 size={11} style={{ color: B.red }} />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {/* Charts row */}
+      {validMonths.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Burn breakdown pie */}
+          {burnPie.length > 0 && (
+            <Card>
+              <div className="px-4 py-3 border-b" style={{ borderColor: B.brd }}>
+                <span className="font-semibold text-sm" style={{ color: B.pri }}>Burn Breakdown (Avg)</span>
+              </div>
+              <div className="p-4 flex items-center gap-4">
+                <div style={{ width: 130, height: 130 }}>
+                  <ResponsiveContainer>
+                    <PieChart>
+                      <Pie data={burnPie} dataKey="value" cx="50%" cy="50%" innerRadius={30} outerRadius={55} paddingAngle={2}>
+                        {burnPie.map((_, i) => <Cell key={i} fill={["#EA580C", B.red, B.gold][i]} />)}
+                      </Pie>
+                      <Tooltip formatter={v => fmt(v)} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="flex-1 space-y-2">
+                  {burnPie.map((d, i) => (
+                    <div key={d.name} className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-2.5 h-2.5 rounded-sm" style={{ background: ["#EA580C", B.red, B.gold][i] }} />
+                        <span style={{ color: B.txt }}>{d.name}</span>
+                      </div>
+                      <span className="font-semibold" style={{ color: B.txt }}>{fmt(d.value)}/mo</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* Monthly trend */}
+          <Card>
+            <div className="px-4 py-3 border-b" style={{ borderColor: B.brd }}>
+              <span className="font-semibold text-sm" style={{ color: B.pri }}>Income vs Outflows</span>
+            </div>
+            <div className="p-4" style={{ height: 180 }}>
+              <ResponsiveContainer>
+                <BarChart data={trendData} margin={{ left: 5, right: 5 }}>
+                  <XAxis dataKey="month" tick={{ fontSize: 10 }} />
+                  <YAxis tickFormatter={v => `$${(v/1000).toFixed(0)}k`} tick={{ fontSize: 10 }} />
+                  <Tooltip formatter={v => fmt(v)} />
+                  <Legend wrapperStyle={{ fontSize: 10 }} />
+                  <Bar dataKey="income" name="Income" fill={B.grn} radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="outflows" name="Outflows" fill="#EA580C" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Leak Finder */}
+      <Card>
+        <div className="px-4 py-3 flex items-center justify-between cursor-pointer"
+          style={{ background: "#FFF7ED", borderBottom: showLeaks ? `1px solid ${B.brd}` : "none" }}
+          onClick={() => setShowLeaks(p => !p)}>
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={15} style={{ color: "#EA580C" }} />
+            <span className="font-semibold text-sm" style={{ color: B.pri }}>Cash Leak Finder</span>
+            {totalLeaks > 0 && (
+              <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: B.redL, color: B.red }}>
+                {fmt(totalLeaks)}/mo in leaks ({leakPercent.toFixed(0)}% of burn)
+              </span>
+            )}
+          </div>
+          {showLeaks ? <ChevronUp size={15} style={{ color: B.mut }} /> : <ChevronDown size={15} style={{ color: B.mut }} />}
+        </div>
+        {showLeaks && (
+          <div className="p-4 space-y-3">
+            <div className="text-xs mb-2" style={{ color: B.mut }}>
+              Track the three silent killers: Subscription Creep, Dining/Delivery Drain, and Invisible Upgrades. How much are they really costing you?
+            </div>
+            {leaks.map(l => (
+              <div key={l.id} className="flex items-center gap-3">
+                <input type="text" value={l.name}
+                  onChange={e => setLeaks(p => p.map(ll => ll.id === l.id ? { ...ll, name: e.target.value } : ll))}
+                  className="flex-1 px-3 py-2 rounded-lg border text-sm outline-none" style={{ borderColor: B.brd }} />
+                <div className="flex items-center gap-1">
+                  <span className="text-xs" style={{ color: B.mut }}>$</span>
+                  <input type="number" value={l.amount} placeholder="0"
+                    onChange={e => setLeaks(p => p.map(ll => ll.id === l.id ? { ...ll, amount: e.target.value } : ll))}
+                    className="w-24 px-2 py-2 rounded-lg border text-sm text-right outline-none" style={{ borderColor: B.brd }} />
+                  <span className="text-xs" style={{ color: B.mut }}>/mo</span>
+                </div>
+                <button onClick={() => setLeaks(p => p.filter(ll => ll.id !== l.id))}
+                  className="p-1 rounded hover:bg-red-50 opacity-40 hover:opacity-100">
+                  <Trash2 size={12} style={{ color: B.red }} />
+                </button>
+              </div>
+            ))}
+            <button onClick={() => setLeaks(p => [...p, { id: uid(), name: "New Category", amount: "" }])}
+              className="flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-lg"
+              style={{ background: "#FFF7ED", color: "#EA580C", border: "1px solid #EA580C" }}>
+              <Plus size={12} /> Add Leak Category
+            </button>
+
+            {totalLeaks > 0 && (
+              <div className="rounded-xl p-3 mt-2" style={{ background: B.redL, border: `1px solid ${B.red}` }}>
+                <div className="text-sm font-semibold" style={{ color: B.red }}>
+                  You're leaking {fmt(totalLeaks)}/month ({fmt(totalLeaks * 12)}/year)
+                </div>
+                <div className="text-xs mt-1" style={{ color: B.mut }}>
+                  That's {leakPercent.toFixed(0)}% of your monthly burn rate going to avoidable expenses.
+                  {totalLeaks * 12 > 5000 && " Redirecting even half of this to debt payoff or investments could change your financial trajectory."}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
+
+      {/* Action plan */}
+      {avgBurnRate > 0 && (
+        <Card>
+          <div className="px-4 py-3 border-b" style={{ borderColor: B.brd }}>
+            <span className="font-semibold text-sm" style={{ color: B.pri }}>Your Burn Rate Action Plan</span>
+          </div>
+          <div className="p-4 space-y-3">
+            {[
+              { check: burnRatio <= 70, text: `Burn ratio is ${burnRatio.toFixed(0)}%${burnRatio <= 70 ? " - you're in good shape" : burnRatio <= 85 ? " - tighten up where you can" : " - this needs immediate attention"}` },
+              { check: monthlySurplus > 0, text: monthlySurplus > 0 ? `Monthly surplus of ${fmt(monthlySurplus)} available for investing or debt payoff` : `Monthly deficit of ${fmt(Math.abs(monthlySurplus))} - you're spending more than you earn` },
+              { check: totalLeaks < avgBurnRate * 0.1, text: totalLeaks > 0 ? `Cash leaks: ${fmt(totalLeaks)}/mo (${leakPercent.toFixed(0)}% of burn)${leakPercent > 15 ? " - high leak ratio, review subscriptions" : ""}` : "Run the Leak Finder above to identify hidden drains" },
+              { check: validMonths.length >= 3, text: validMonths.length >= 3 ? "Using 3+ months of data - good statistical basis" : "Add more months for a more accurate burn rate" },
+            ].map((item, i) => (
+              <div key={i} className="flex items-start gap-2">
+                {item.check
+                  ? <Check size={14} style={{ color: B.grn, marginTop: 2 }} />
+                  : <AlertTriangle size={14} style={{ color: B.gold, marginTop: 2 }} />}
+                <span className="text-xs" style={{ color: B.txt }}>{item.text}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 // ── Savings Input (module-level to avoid focus-loss)
 const SavingsInput = ({ label, value, onChange, type = "text", pre }) => (
   <div className="flex-1 min-w-0">
@@ -1138,6 +1662,7 @@ export default function BudgetPlanner({ isPro, setShowPro }) {
     { id: "transactions", label: "Transactions", icon: List },
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "debt", label: "Debt Snowball", icon: CreditCard },
+    { id: "burnrate", label: "Burn Rate", icon: Flame },
     { id: "savings", label: "Savings Goals", icon: Target },
   ];
 
@@ -1169,6 +1694,7 @@ export default function BudgetPlanner({ isPro, setShowPro }) {
       {tab === "transactions" && <TransactionTab transactions={transactions} setTransactions={setTransactions} budgetData={budgetData} />}
       {tab === "dashboard" && <DashboardTab budgetData={budgetData} transactions={transactions} year={year} />}
       {tab === "debt" && <DebtSnowballTab debts={debts} setDebts={setDebts} />}
+      {tab === "burnrate" && <BurnRateTab />}
       {tab === "savings" && <SavingsGoalsTab funds={savingsFunds} setFunds={setSavingsFunds} savingsLog={savingsLog} setSavingsLog={setSavingsLog} />}
     </div>
   );

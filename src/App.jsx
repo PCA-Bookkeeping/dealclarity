@@ -8,7 +8,7 @@ import {
   Calculator, DollarSign, TrendingUp, Building2, AlertTriangle, ChevronDown, ChevronUp,
   Lock, Check, ArrowRight, BarChart3, PiggyBank, Clock, Percent, Home, Layers, Warehouse,
   Users, Star, Zap, FileText, GitCompare, Settings, Menu, X, Copy, Download, Plus, Trash2,
-  ArrowUpRight, ArrowDownRight, Target, Shield, Award, Briefcase, Key, MapPin, Hash, Activity,
+  ArrowUpRight, ArrowDownRight, Target, Shield, Award, Briefcase, Key, MapPin, Hash, Activity, Brain,
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -16,6 +16,7 @@ import BudgetPlanner from "./BudgetPlanner";
 import AgentHub from "./AgentHub";
 import PulseCheck from "./PulseCheck";
 import PLReader from "./PLReader";
+import DealAdvisor from "./DealAdvisor";
 import { trackEvent, EVENTS } from "./utils/analytics";
 import { fetchCloudDeals, saveCloudDeal, deleteCloudDeal, mergeLocalToCloud } from "./utils/dealSync";
 
@@ -112,7 +113,7 @@ const T = {
     mhp: "Mobile Home Park", mhpD: "MHP Operators",
     storage: "Self-Storage", storageD: "Storage Facilities",
     // Pages
-    analyze: "Analyze", portfolio: "Portfolio", compare: "Compare", splits: "Splits", whatIf: "What-If", agentHub: "Agent Hub", pulseCheck: "Pulse Check", plReader: "P&L Reader",
+    analyze: "Analyze", portfolio: "Portfolio", compare: "Compare", splits: "Splits", whatIf: "What-If", agentHub: "Agent Hub", pulseCheck: "Pulse Check", plReader: "P&L Reader", advisor: "AI Advisor", account: "Account",
     // Grades
     gradeAp: "Exceptional - move fast", gradeA: "Strong deal", gradeB: "Good, manageable risk",
     gradeC: "Marginal - proceed with caution", gradeD: "Weak - significant risk", gradeF: "Walk away",
@@ -250,7 +251,7 @@ const T = {
     multi: "Multifamiliar", multiD: "Apartamentos y Sindicacion",
     mhp: "Parque de Casas Moviles", mhpD: "Operadores de MHP",
     storage: "Autoalmacenamiento", storageD: "Instalaciones de Almacenaje",
-    analyze: "Analizar", portfolio: "Portafolio", compare: "Comparar", splits: "Socios", whatIf: "Escenarios", agentHub: "Agent Hub", pulseCheck: "Pulse Check", plReader: "Lector P&L",
+    analyze: "Analizar", portfolio: "Portafolio", compare: "Comparar", splits: "Socios", whatIf: "Escenarios", agentHub: "Agent Hub", pulseCheck: "Pulse Check", plReader: "Lector P&L", advisor: "AI Asesor", account: "Cuenta",
     gradeAp: "Excepcional - actua rapido", gradeA: "Buen negocio", gradeB: "Bueno, riesgo manejable",
     gradeC: "Marginal - procede con cautela", gradeD: "Debil - riesgo significativo", gradeF: "No lo hagas",
     tagline: "Rentabilidad Real para Operadores Inmobiliarios", upgradePro: "Hazte Pro",
@@ -386,6 +387,8 @@ const getPages = (t) => [
   { id: "agent", label: t.agentHub, icon: Briefcase },
   { id: "pulse", label: t.pulseCheck, icon: Activity },
   { id: "pnl", label: t.plReader, icon: FileText },
+  { id: "advisor", label: t.advisor, icon: Brain },
+  { id: "account", label: t.account, icon: Settings },
 ];
 const getGrades = (t) => [
   { min: 90, grade: "A+", color: "#16A34A", bg: "#DCFCE7", label: t.gradeAp },
@@ -2028,7 +2031,7 @@ export default function DealClarity() {
   const [saved, setSaved] = useState(false);
   const [showPro, setShowPro] = useState(false);
   const [pdfMsg, setPdfMsg] = useState("");
-  const [isPro, setIsPro] = useState(false); // Always starts false — verified from Supabase via onAuthStateChange
+  const [isPro, setIsPro] = useState(() => { try { return localStorage.getItem("dc_pro") === "true"; } catch { return false; } }); // Start from cache, then verify from Supabase
   const [user, setUser] = useState(null);
   const [showAuth, setShowAuth] = useState(false);
   const [authEmail, setAuthEmail] = useState("");
@@ -2167,6 +2170,7 @@ export default function DealClarity() {
       const data = await res.json();
       if (data.success) {
         setIsPro(true);
+        try { localStorage.setItem("dc_pro", "true"); } catch {}
         setProMsg("Pro activated! Full access unlocked.");
         trackEvent(EVENTS.PRO_ACTIVATED, { method: "code" });
         setTimeout(() => { setProMsg(""); setShowPro(false); }, 2000);
@@ -2211,10 +2215,17 @@ export default function DealClarity() {
   };
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
-    // onAuthStateChange handles cleanup — but set state directly for immediate UI update
-    setUser(null); setIsPro(false); setPortfolio([]); setTrialEndsAt(null);
-    try { localStorage.removeItem("dc_portfolio"); localStorage.removeItem("dc_pro"); } catch {}
+    try {
+      // Clear state immediately for instant UI feedback
+      setUser(null); setIsPro(false); setPortfolio([]); setTrialEndsAt(null);
+      try { localStorage.removeItem("dc_portfolio"); localStorage.removeItem("dc_pro"); } catch {}
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.error("Sign out error:", err);
+      // Force clear even if signOut fails
+      setUser(null); setIsPro(false); setPortfolio([]);
+      try { localStorage.clear(); } catch {}
+    }
   };
 
   const handleManageSubscription = async () => {
@@ -2251,40 +2262,39 @@ export default function DealClarity() {
   return result;
 }, [dealType, cd]);
   const saveDeal = async () => {
-  if (editingDeal) {
-    const editedDeal = portfolio.find(d => d.id === editingDeal);
-    const next = portfolio.map(d =>
-      d.id === editingDeal ? { ...d, data: { ...cd }, calc } : d
-    );
+    if (editingDeal) {
+      const editedDeal = portfolio.find(d => d.id === editingDeal);
+      const next = portfolio.map(d =>
+        d.id === editingDeal ? { ...d, data: { ...cd }, calc } : d
+      );
+      setPortfolio(next);
+      saveToStorage(next); // Always save to localStorage as backup
+      if (isPro && user && editedDeal?.cloudId) {
+        try { await saveCloudDeal({ ...editedDeal, data: { ...cd }, calc }, user.id); }
+        catch (err) { console.error("Cloud save error:", err); }
+      }
+      setEditingDeal(null);
+      setSaved(true);
+      showToast("Deal updated!", "success");
+      setTimeout(() => setSaved(false), 2000);
+      return;
+    }
+    if (!isPro && portfolio.length >= 2) { setShowPro(true); trackEvent(EVENTS.PRO_MODAL_OPENED, { trigger: "save_limit" }); return; }
+    const newDeal = { id: uid(), type: dealType, data: { ...cd }, calc };
+    if (isPro && user) {
+      try {
+        const cloudSaved = await saveCloudDeal(newDeal, user.id);
+        if (cloudSaved) { newDeal.id = cloudSaved.id; newDeal.cloudId = cloudSaved.id; }
+      } catch (err) { console.error("Cloud save error:", err); }
+    }
+    const next = [...portfolio, newDeal];
     setPortfolio(next);
-    // Pro: update in cloud; Free: update in localStorage
-    if (isPro && user && editedDeal?.cloudId) {
-      saveCloudDeal({ ...editedDeal, data: { ...cd }, calc }, user.id);
-    } else {
-      saveToStorage(next);
-    }
-    setEditingDeal(null);
+    saveToStorage(next); // Always save to localStorage as backup for all users
     setSaved(true);
+    showToast("Deal saved to portfolio!", "success");
+    trackEvent(EVENTS.DEAL_SAVED, { dealType, portfolioSize: next.length, cloud: !!isPro });
     setTimeout(() => setSaved(false), 2000);
-    return;
-  }
-  if (!isPro && portfolio.length >= 2) { setShowPro(true); trackEvent(EVENTS.PRO_MODAL_OPENED, { trigger: "save_limit" }); return; }
-  const newDeal = { id: uid(), type: dealType, data: { ...cd }, calc };
-  // Pro: save to cloud and get the cloud ID back
-  if (isPro && user) {
-    const saved = await saveCloudDeal(newDeal, user.id);
-    if (saved) {
-      newDeal.id = saved.id;
-      newDeal.cloudId = saved.id;
-    }
-  }
-  const next = [...portfolio, newDeal];
-  setPortfolio(next);
-  if (!isPro) saveToStorage(next); // Free users still use localStorage
-  setSaved(true);
-  trackEvent(EVENTS.DEAL_SAVED, { dealType, portfolioSize: next.length, cloud: !!isPro });
-  setTimeout(() => setSaved(false), 2000);
-};
+  };
   const removeDeal = async (id) => {
     const deal = portfolio.find(d => d.id === id);
     if (isPro && deal?.cloudId) { await deleteCloudDeal(deal.cloudId); }
@@ -2579,6 +2589,166 @@ export default function DealClarity() {
         {page === "agent" && <AgentHub t={t} isPro={isPro} setShowPro={setShowPro} user={user} />}
         {page === "pulse" && <PulseCheck isPro={isPro} setShowPro={setShowPro} />}
         {page === "pnl" && <PLReader isPro={isPro} setShowPro={setShowPro} />}
+        {page === "advisor" && <DealAdvisor deal={null} dealType={dealType} calc={calc} inputs={cd} isPro={isPro} setShowPro={setShowPro} portfolio={portfolio} dealTypes={localDealTypes} />}
+
+        {/* ═══ ACCOUNT MANAGEMENT PAGE ═══ */}
+        {page === "account" && (
+          <div className="space-y-6 max-w-2xl mx-auto">
+            <div>
+              <h2 className="text-lg font-bold" style={{ color: B.pri }}>Account Settings</h2>
+              <p className="text-xs" style={{ color: B.mut }}>Manage your profile, subscription, and preferences</p>
+            </div>
+
+            {!user ? (
+              <div className="rounded-2xl border p-8 text-center" style={{ borderColor: B.brd, background: B.card }}>
+                <div style={{ fontSize: 48, marginBottom: 12 }}>🔐</div>
+                <h3 className="text-lg font-bold mb-2" style={{ color: B.pri }}>Sign in to manage your account</h3>
+                <p className="text-sm mb-4" style={{ color: B.mut }}>Create an account or sign in to access settings, manage your subscription, and sync your data across devices.</p>
+                <button onClick={() => setShowAuth(true)} className="px-6 py-3 rounded-xl font-semibold text-sm hover:opacity-90"
+                  style={{ background: B.pri, color: "#fff" }}>Sign In / Create Account</button>
+              </div>
+            ) : (
+              <>
+                {/* Profile Card */}
+                <div className="rounded-2xl border overflow-hidden" style={{ borderColor: B.brd, background: B.card }}>
+                  <div className="p-4 flex items-center gap-4" style={{ background: B.pri }}>
+                    <div className="w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold" style={{ background: B.gold, color: B.pri }}>
+                      {user.email?.[0]?.toUpperCase() || "U"}
+                    </div>
+                    <div>
+                      <div className="text-white font-bold">{user.email}</div>
+                      <div className="text-xs" style={{ color: "#A3B8D4" }}>Member since {new Date(user.created_at || Date.now()).toLocaleDateString("en-US", { month: "long", year: "numeric" })}</div>
+                    </div>
+                  </div>
+                  <div className="p-4 grid grid-cols-2 gap-4">
+                    <div className="rounded-xl p-3" style={{ background: isPro ? B.goldL : "#F3F4F6" }}>
+                      <div className="text-xs font-medium mb-1" style={{ color: B.mut }}>Plan</div>
+                      <div className="text-lg font-bold" style={{ color: isPro ? B.goldD : B.pri }}>{isPro ? "Pro" : "Free"}</div>
+                    </div>
+                    <div className="rounded-xl p-3" style={{ background: B.grnL }}>
+                      <div className="text-xs font-medium mb-1" style={{ color: B.mut }}>Deals Saved</div>
+                      <div className="text-lg font-bold" style={{ color: B.grn }}>{portfolio.length}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Subscription Management */}
+                <div className="rounded-2xl border" style={{ borderColor: B.brd, background: B.card }}>
+                  <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: B.brd }}>
+                    <CreditCard size={15} style={{ color: B.pri }} />
+                    <span className="font-semibold text-sm" style={{ color: B.pri }}>Subscription & Billing</span>
+                  </div>
+                  <div className="p-4 space-y-4">
+                    {isPro ? (
+                      <>
+                        <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: B.goldL, border: `1px solid ${B.gold}` }}>
+                          <Zap size={20} style={{ color: B.goldD }} />
+                          <div className="flex-1">
+                            <div className="text-sm font-bold" style={{ color: B.goldD }}>Pro Plan Active</div>
+                            <div className="text-xs" style={{ color: B.mut }}>Full access to all features, unlimited data storage, cloud sync</div>
+                          </div>
+                          <Check size={18} style={{ color: B.grn }} />
+                        </div>
+                        <button onClick={handleManageSubscription}
+                          className="w-full py-3 rounded-xl text-sm font-semibold border-2 transition-all hover:opacity-90"
+                          style={{ borderColor: B.blue, color: B.blue, background: B.blueL }}>
+                          Manage Subscription / Billing
+                        </button>
+                        <p className="text-xs text-center" style={{ color: B.mut }}>
+                          Opens Stripe Customer Portal — update payment method, view invoices, or cancel subscription
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: "#F3F4F6" }}>
+                          <Lock size={20} style={{ color: B.mut }} />
+                          <div className="flex-1">
+                            <div className="text-sm font-bold" style={{ color: B.pri }}>Free Plan</div>
+                            <div className="text-xs" style={{ color: B.mut }}>Basic deal analysis. Data stored for 30 days. Upgrade for full access.</div>
+                          </div>
+                        </div>
+                        {trialDaysLeft != null && trialDaysLeft > 0 && (
+                          <div className="p-3 rounded-xl text-center" style={{ background: B.goldL, border: `1px solid ${B.gold}` }}>
+                            <span className="text-sm font-semibold" style={{ color: B.goldD }}>
+                              Trial: {trialDaysLeft} days remaining
+                            </span>
+                          </div>
+                        )}
+                        <button onClick={() => setShowPro(true)}
+                          className="w-full py-3 rounded-xl text-sm font-bold hover:opacity-90"
+                          style={{ background: B.gold, color: B.pri }}>
+                          Upgrade to Pro
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Data & Storage */}
+                <div className="rounded-2xl border" style={{ borderColor: B.brd, background: B.card }}>
+                  <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: B.brd }}>
+                    <Shield size={15} style={{ color: B.pri }} />
+                    <span className="font-semibold text-sm" style={{ color: B.pri }}>Data & Storage</span>
+                  </div>
+                  <div className="p-4 space-y-3">
+                    <div className="flex items-center justify-between text-sm">
+                      <span style={{ color: B.txt }}>Portfolio deals</span>
+                      <span className="font-semibold" style={{ color: B.pri }}>{portfolio.length}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span style={{ color: B.txt }}>Data retention</span>
+                      <span className="font-semibold" style={{ color: isPro ? B.grn : B.gold }}>{isPro ? "Unlimited (forever)" : "30 days"}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span style={{ color: B.txt }}>Cloud sync</span>
+                      <span className="font-semibold" style={{ color: isPro ? B.grn : B.mut }}>{isPro ? "Enabled" : "Pro only"}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span style={{ color: B.txt }}>Local backup</span>
+                      <span className="font-semibold" style={{ color: B.grn }}>Active</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Preferences */}
+                <div className="rounded-2xl border" style={{ borderColor: B.brd, background: B.card }}>
+                  <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: B.brd }}>
+                    <Settings size={15} style={{ color: B.pri }} />
+                    <span className="font-semibold text-sm" style={{ color: B.pri }}>Preferences</span>
+                  </div>
+                  <div className="p-4 space-y-3">
+                    <div className="flex items-center justify-between text-sm">
+                      <span style={{ color: B.txt }}>Language</span>
+                      <button onClick={toggleLang} className="px-3 py-1.5 rounded-lg text-xs font-semibold"
+                        style={{ background: B.blueL, color: B.blue }}>
+                        {lang === "en" ? "English (switch to ES)" : "Espanol (cambiar a EN)"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Danger Zone */}
+                <div className="rounded-2xl border" style={{ borderColor: B.red, background: B.card }}>
+                  <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: B.red }}>
+                    <AlertTriangle size={15} style={{ color: B.red }} />
+                    <span className="font-semibold text-sm" style={{ color: B.red }}>Account Actions</span>
+                  </div>
+                  <div className="p-4 space-y-3">
+                    <button onClick={handleSignOut}
+                      className="w-full py-3 rounded-xl text-sm font-semibold border-2 transition-all hover:opacity-90"
+                      style={{ borderColor: B.red, color: B.red, background: B.redL }}>
+                      Sign Out
+                    </button>
+                    <p className="text-xs text-center" style={{ color: B.mut }}>
+                      You can sign back in from any device using your email and password
+                    </p>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         <footer className="text-center py-6 mt-8 border-t" style={{ borderColor: B.brd }}><p className="text-xs" style={{ color: B.mut }}>{t.footer}</p></footer>
       </main>
 

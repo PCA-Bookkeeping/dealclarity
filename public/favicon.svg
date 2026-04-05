@@ -1,4 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="6" fill="#1B4332"/>
-  <text x="16" y="22" text-anchor="middle" font-family="Arial" font-weight="bold" font-size="18" fill="#D4A843">D</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background hexagon -->
+  <polygon points="256,20 468,140 468,372 256,492 44,372 44,140" fill="#0F1A2E" stroke="#C9A54C" stroke-width="12"/>
+  <!-- Bar chart bars (gold) -->
+  <rect x="148" y="320" width="56" height="90" rx="4" fill="#C9A54C"/>
+  <rect x="228" y="260" width="56" height="150" rx="4" fill="#C9A54C"/>
+  <rect x="308" y="200" width="56" height="210" rx="4" fill="#C9A54C"/>
+  <!-- Horizontal line across bars -->
+  <line x1="130" y1="290" x2="382" y2="290" stroke="#5A82AD" stroke-width="3" opacity="0.6"/>
+  <!-- Small diamond accent above -->
+  <rect x="248" y="140" width="16" height="16" rx="2" fill="#C9A54C" transform="rotate(45 256 148)"/>
 </svg>
