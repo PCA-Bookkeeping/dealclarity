@@ -15,6 +15,7 @@ import autoTable from "jspdf-autotable";
 import BudgetPlanner from "./BudgetPlanner";
 import AgentHub from "./AgentHub";
 import PulseCheck from "./PulseCheck";
+import PLReader from "./PLReader";
 import { trackEvent, EVENTS } from "./utils/analytics";
 import { fetchCloudDeals, saveCloudDeal, deleteCloudDeal, mergeLocalToCloud } from "./utils/dealSync";
 
@@ -111,7 +112,7 @@ const T = {
     mhp: "Mobile Home Park", mhpD: "MHP Operators",
     storage: "Self-Storage", storageD: "Storage Facilities",
     // Pages
-    analyze: "Analyze", portfolio: "Portfolio", compare: "Compare", splits: "Splits", whatIf: "What-If", agentHub: "Agent Hub", pulseCheck: "Pulse Check",
+    analyze: "Analyze", portfolio: "Portfolio", compare: "Compare", splits: "Splits", whatIf: "What-If", agentHub: "Agent Hub", pulseCheck: "Pulse Check", plReader: "P&L Reader",
     // Grades
     gradeAp: "Exceptional - move fast", gradeA: "Strong deal", gradeB: "Good, manageable risk",
     gradeC: "Marginal - proceed with caution", gradeD: "Weak - significant risk", gradeF: "Walk away",
@@ -249,7 +250,7 @@ const T = {
     multi: "Multifamiliar", multiD: "Apartamentos y Sindicacion",
     mhp: "Parque de Casas Moviles", mhpD: "Operadores de MHP",
     storage: "Autoalmacenamiento", storageD: "Instalaciones de Almacenaje",
-    analyze: "Analizar", portfolio: "Portafolio", compare: "Comparar", splits: "Socios", whatIf: "Escenarios", agentHub: "Agent Hub", pulseCheck: "Pulse Check",
+    analyze: "Analizar", portfolio: "Portafolio", compare: "Comparar", splits: "Socios", whatIf: "Escenarios", agentHub: "Agent Hub", pulseCheck: "Pulse Check", plReader: "Lector P&L",
     gradeAp: "Excepcional - actua rapido", gradeA: "Buen negocio", gradeB: "Bueno, riesgo manejable",
     gradeC: "Marginal - procede con cautela", gradeD: "Debil - riesgo significativo", gradeF: "No lo hagas",
     tagline: "Rentabilidad Real para Operadores Inmobiliarios", upgradePro: "Hazte Pro",
@@ -384,6 +385,7 @@ const getPages = (t) => [
   { id: "budget", label: "Budget", icon: PiggyBank },
   { id: "agent", label: t.agentHub, icon: Briefcase },
   { id: "pulse", label: t.pulseCheck, icon: Activity },
+  { id: "pnl", label: t.plReader, icon: FileText },
 ];
 const getGrades = (t) => [
   { min: 90, grade: "A+", color: "#16A34A", bg: "#DCFCE7", label: t.gradeAp },
@@ -1281,20 +1283,224 @@ const Portfolio = ({ deals, removeDeal, editDeal, exportPDF, t, getGradeL, local
 // ═══════════════════════════════════════════════════════════════
 // PAGE: COMPARE
 // ═══════════════════════════════════════════════════════════════
+const COMP_COLORS = [B.pri, B.gold, B.blue, B.purple, B.grn, "#EA580C", "#0D9488", "#BE185D"];
 const Compare = ({ deals, t, localDealTypes }) => {
   const [sel, setSel] = useState([0, 1]);
-  if (deals.length < 2) return (<div className="text-center py-16"><GitCompare size={48} style={{ color: B.brd, margin: "0 auto 12px" }} /><h3 className="text-lg font-bold mb-2">{t.needTwo}</h3><p className="text-sm" style={{ color: B.mut }}>{t.needTwoDesc}</p></div>);
-  const d1 = deals[sel[0]] || deals[0], d2 = deals[sel[1]] || deals[1];
+  const [view, setView] = useState("table"); // table | radar | bar
+
+  if (deals.length < 2) return (
+    <div className="text-center py-16">
+      <GitCompare size={48} style={{ color: B.brd, margin: "0 auto 12px" }} />
+      <h3 className="text-lg font-bold mb-2">{t.needTwo}</h3>
+      <p className="text-sm" style={{ color: B.mut }}>{t.needTwoDesc}</p>
+    </div>
+  );
+
+  const addSlot = () => {
+    if (sel.length >= Math.min(deals.length, 6)) return;
+    const next = deals.findIndex((_, i) => !sel.includes(i));
+    setSel([...sel, next >= 0 ? next : 0]);
+  };
+  const removeSlot = (idx) => {
+    if (sel.length <= 2) return;
+    setSel(sel.filter((_, i) => i !== idx));
+  };
+
+  const selected = sel.map(i => deals[i] || deals[0]);
+  const dealName = (d) => d.data.name || `${localDealTypes.find(dt => dt.id === d.type)?.label || d.type} Deal`;
+
   const metrics = [
-    { label: t.dealScore, v1: Math.round(d1.calc.score), v2: Math.round(d2.calc.score), f: v => `${v}/100`, better: "higher" },
-    { label: t.monthlyCF, v1: d1.calc.moCF || d1.calc.profitPerMonth || 0, v2: d2.calc.moCF || d2.calc.profitPerMonth || 0, f: v => fmt(v), better: "higher" },
-    { label: t.cashInvested, v1: d1.calc.cashIn || d1.calc.cash || 0, v2: d2.calc.cashIn || d2.calc.cash || 0, f: v => fmt(v), better: "lower" },
-    { label: t.roiCoC, v1: d1.calc.coC || d1.calc.roi || 0, v2: d2.calc.coC || d2.calc.roi || 0, f: v => fp(v), better: "higher" },
+    { key: "score", label: t.dealScore, get: d => Math.round(d.calc.score || 0), f: v => `${v}/100`, better: "higher", max: 100 },
+    { key: "moCF", label: t.monthlyCF, get: d => d.calc.moCF || d.calc.profitPerMonth || 0, f: v => fmt(v), better: "higher" },
+    { key: "cashIn", label: t.cashInvested, get: d => d.calc.cashIn || d.calc.cash || 0, f: v => fmt(v), better: "lower" },
+    { key: "coC", label: t.roiCoC, get: d => d.calc.coC || d.calc.roi || 0, f: v => fp(v), better: "higher" },
+    { key: "annCF", label: "Annual Cash Flow", get: d => d.calc.annCF || (d.calc.moCF || 0) * 12 || d.calc.profit || 0, f: v => fmt(v), better: "higher" },
+    { key: "capRate", label: "Cap Rate", get: d => d.calc.capRate || 0, f: v => fp(v), better: "higher" },
+    { key: "dscr", label: "DSCR", get: d => d.calc.dscr || 0, f: v => v.toFixed(2), better: "higher" },
+    { key: "grade", label: "Grade", get: d => d.calc.score || 0, f: v => v >= 80 ? "A" : v >= 65 ? "B" : v >= 50 ? "C" : v >= 35 ? "D" : "F", better: "higher", noChart: true },
   ];
-  return (<div className="space-y-6">
-    <div className="flex gap-4">{[0, 1].map(idx => (<div key={idx} className="flex-1"><label className="text-xs font-medium mb-1 block" style={{ color: B.mut }}>{t.deal} {idx + 1}</label><select value={sel[idx]} onChange={e => { const n = [...sel]; n[idx] = Number(e.target.value); setSel(n); }} className="w-full p-2 rounded-lg border text-sm" style={{ borderColor: B.brd }}>{deals.map((d, i) => <option key={d.id} value={i}>{d.data.name || `${localDealTypes.find(dt => dt.id === d.type)?.label} Deal`}</option>)}</select></div>))}</div>
-    <div className="space-y-2">{metrics.map(m => { const w = m.better === "higher" ? (m.v1 > m.v2 ? 1 : m.v2 > m.v1 ? 2 : 0) : (m.v1 < m.v2 ? 1 : m.v2 < m.v1 ? 2 : 0); return (<div key={m.label} className="flex items-center gap-3 p-3 rounded-lg border" style={{ borderColor: B.brd }}><div className="w-32 text-xs font-medium" style={{ color: B.mut }}>{m.label}</div><div className={`flex-1 text-center text-sm font-bold ${w === 1 ? "rounded-lg py-1" : ""}`} style={{ color: w === 1 ? B.grn : B.txt, background: w === 1 ? B.grnL : "transparent" }}>{m.f(m.v1)} {w === 1 && "✓"}</div><div className="text-xs" style={{ color: B.mut }}>vs</div><div className={`flex-1 text-center text-sm font-bold ${w === 2 ? "rounded-lg py-1" : ""}`} style={{ color: w === 2 ? B.grn : B.txt, background: w === 2 ? B.grnL : "transparent" }}>{m.f(m.v2)} {w === 2 && "✓"}</div></div>); })}</div>
-  </div>);
+
+  // Find winner per metric
+  const findWinner = (m) => {
+    const vals = selected.map(d => m.get(d));
+    if (m.better === "higher") { const mx = Math.max(...vals); return vals.map(v => v === mx && v > 0 ? true : false); }
+    const mn = Math.min(...vals.filter(v => v > 0)); return vals.map(v => v === mn && v > 0 ? true : false);
+  };
+
+  // Overall winner: count of metric wins
+  const winCounts = selected.map(() => 0);
+  metrics.forEach(m => { const wins = findWinner(m); wins.forEach((w, i) => { if (w) winCounts[i]++; }); });
+  const maxWins = Math.max(...winCounts);
+  const overallWinnerIdx = winCounts.indexOf(maxWins);
+
+  // Radar data: normalize each metric 0-100
+  const chartMetrics = metrics.filter(m => !m.noChart && m.key !== "cashIn");
+  const radarData = chartMetrics.map(m => {
+    const vals = selected.map(d => m.get(d));
+    const mx = Math.max(...vals, 1);
+    const row = { metric: m.label.length > 12 ? m.label.slice(0, 12) + "..." : m.label };
+    selected.forEach((d, i) => { row[`d${i}`] = Math.round((vals[i] / mx) * 100); });
+    return row;
+  });
+
+  // Bar chart data
+  const barMetrics = metrics.filter(m => !m.noChart && m.key !== "grade");
+  const barData = barMetrics.map(m => {
+    const row = { metric: m.label.length > 10 ? m.label.slice(0, 10) + "..." : m.label };
+    selected.forEach((d, i) => { row[`d${i}`] = m.get(d); });
+    return row;
+  });
+
+  return (
+    <div className="space-y-5">
+      {/* Deal selectors */}
+      <div className="flex flex-wrap gap-3 items-end">
+        {sel.map((s, idx) => (
+          <div key={idx} style={{ minWidth: 160, flex: 1, maxWidth: 220 }}>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-medium" style={{ color: COMP_COLORS[idx] || B.mut }}>Deal {idx + 1}</label>
+              {sel.length > 2 && <button onClick={() => removeSlot(idx)} className="text-xs hover:opacity-80" style={{ color: B.red }}>Remove</button>}
+            </div>
+            <select value={s} onChange={e => { const n = [...sel]; n[idx] = Number(e.target.value); setSel(n); }}
+              className="w-full p-2 rounded-lg border text-sm" style={{ borderColor: COMP_COLORS[idx] || B.brd, borderWidth: 2 }}>
+              {deals.map((d, i) => <option key={d.id} value={i}>{dealName(d)}</option>)}
+            </select>
+          </div>
+        ))}
+        {sel.length < Math.min(deals.length, 6) && (
+          <button onClick={addSlot} className="flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-semibold hover:opacity-80" style={{ background: B.grnL, color: B.grn }}>
+            <Plus size={14} /> Add Deal
+          </button>
+        )}
+      </div>
+
+      {/* Overall winner banner */}
+      {maxWins > 0 && (
+        <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: B.grnL, border: `1px solid ${B.grn}22` }}>
+          <Award size={20} style={{ color: B.grn }} />
+          <div>
+            <span className="text-sm font-bold" style={{ color: B.grn }}>{dealName(selected[overallWinnerIdx])}</span>
+            <span className="text-xs ml-2" style={{ color: B.mut }}>wins {maxWins} of {metrics.length} metrics</span>
+          </div>
+        </div>
+      )}
+
+      {/* View toggle */}
+      <div className="flex gap-1 p-1 rounded-lg" style={{ background: B.bg }}>
+        {[{ id: "table", label: "Table" }, { id: "radar", label: "Radar" }, { id: "bar", label: "Bar Chart" }].map(v => (
+          <button key={v.id} onClick={() => setView(v.id)} className="flex-1 py-1.5 text-xs font-semibold rounded-lg"
+            style={{ background: view === v.id ? B.card : "transparent", color: view === v.id ? B.pri : B.mut, boxShadow: view === v.id ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }}>
+            {v.label}
+          </button>
+        ))}
+      </div>
+
+      {/* TABLE VIEW */}
+      {view === "table" && (
+        <div className="overflow-x-auto rounded-xl border" style={{ borderColor: B.brd }}>
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ background: B.bg }}>
+                <th className="text-left p-3 text-xs font-semibold" style={{ color: B.mut, minWidth: 120 }}>Metric</th>
+                {selected.map((d, i) => (
+                  <th key={i} className="text-center p-3 text-xs font-semibold" style={{ color: COMP_COLORS[i], minWidth: 100 }}>
+                    {dealName(d).length > 16 ? dealName(d).slice(0, 16) + "..." : dealName(d)}
+                    {i === overallWinnerIdx && maxWins > 0 && <Award size={12} style={{ display: "inline", marginLeft: 4, color: B.gold }} />}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {metrics.map((m, mi) => {
+                const wins = findWinner(m);
+                return (
+                  <tr key={m.key} style={{ borderTop: `1px solid ${B.brd}`, background: mi % 2 === 0 ? B.card : B.bg }}>
+                    <td className="p-3 text-xs font-medium" style={{ color: B.mut }}>{m.label}</td>
+                    {selected.map((d, i) => {
+                      const val = m.get(d);
+                      return (
+                        <td key={i} className="p-3 text-center font-bold text-sm"
+                          style={{ color: wins[i] ? B.grn : B.txt, background: wins[i] ? B.grnL : "transparent" }}>
+                          {m.f(val)} {wins[i] && <Check size={12} style={{ display: "inline", marginLeft: 2 }} />}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* RADAR VIEW */}
+      {view === "radar" && (
+        <div style={{ background: B.card, borderRadius: 16, padding: 16, border: `1px solid ${B.brd}` }}>
+          <ResponsiveContainer width="100%" height={360}>
+            <RadarChart data={radarData}>
+              <PolarGrid stroke={B.brd} />
+              <PolarAngleAxis dataKey="metric" tick={{ fontSize: 11, fill: B.mut }} />
+              <PolarRadiusAxis domain={[0, 100]} tick={false} axisLine={false} />
+              {selected.map((_, i) => (
+                <Radar key={i} name={dealName(selected[i])} dataKey={`d${i}`}
+                  stroke={COMP_COLORS[i]} fill={COMP_COLORS[i]} fillOpacity={0.12} strokeWidth={2} />
+              ))}
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+            </RadarChart>
+          </ResponsiveContainer>
+          <p className="text-xs text-center mt-2" style={{ color: B.mut }}>Each axis normalized to 100 (highest value among compared deals)</p>
+        </div>
+      )}
+
+      {/* BAR CHART VIEW */}
+      {view === "bar" && (
+        <div style={{ background: B.card, borderRadius: 16, padding: 16, border: `1px solid ${B.brd}` }}>
+          <ResponsiveContainer width="100%" height={Math.max(280, barMetrics.length * 50)}>
+            <BarChart data={barData} layout="vertical" margin={{ left: 10, right: 20, top: 10, bottom: 10 }}>
+              <XAxis type="number" tick={{ fontSize: 10, fill: B.mut }} />
+              <YAxis type="category" dataKey="metric" width={90} tick={{ fontSize: 11, fill: B.mut }} />
+              <Tooltip formatter={(v, name) => {
+                const idx = parseInt(name.replace("d", ""));
+                return [typeof v === "number" ? v.toLocaleString() : v, dealName(selected[idx])];
+              }} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+              {selected.map((_, i) => (
+                <Bar key={i} dataKey={`d${i}`} fill={COMP_COLORS[i]} radius={[0, 4, 4, 0]} barSize={16} />
+              ))}
+              <Legend formatter={(value) => { const idx = parseInt(value.replace("d", "")); return dealName(selected[idx]); }} wrapperStyle={{ fontSize: 12 }} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* Quick summary cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {selected.map((d, i) => {
+          const score = d.calc.score || 0;
+          const grade = score >= 80 ? "A" : score >= 65 ? "B" : score >= 50 ? "C" : score >= 35 ? "D" : "F";
+          const gradeColor = grade === "A" ? B.grn : grade === "B" ? B.blue : grade === "C" ? B.gold : B.red;
+          return (
+            <div key={i} className="p-4 rounded-xl" style={{ background: B.card, border: `2px solid ${COMP_COLORS[i]}22` }}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold truncate" style={{ color: COMP_COLORS[i], maxWidth: "70%" }}>{dealName(d)}</span>
+                <span className="text-lg font-black" style={{ color: gradeColor }}>{grade}</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div><span className="text-xs block" style={{ color: B.mut }}>Score</span><span className="text-sm font-bold">{Math.round(score)}/100</span></div>
+                <div><span className="text-xs block" style={{ color: B.mut }}>Monthly CF</span><span className="text-sm font-bold">{fmt(d.calc.moCF || d.calc.profitPerMonth || 0)}</span></div>
+                <div><span className="text-xs block" style={{ color: B.mut }}>Cash In</span><span className="text-sm font-bold">{fmt(d.calc.cashIn || d.calc.cash || 0)}</span></div>
+                <div><span className="text-xs block" style={{ color: B.mut }}>CoC / ROI</span><span className="text-sm font-bold">{fp(d.calc.coC || d.calc.roi || 0)}</span></div>
+              </div>
+              {i === overallWinnerIdx && maxWins > 0 && (
+                <div className="flex items-center gap-1 mt-2 text-xs font-semibold" style={{ color: B.grn }}>
+                  <Award size={12} /> Best Overall
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -1821,8 +2027,6 @@ export default function DealClarity() {
   const [editingDeal, setEditingDeal] = useState(null); // stores deal id being edited
   const [saved, setSaved] = useState(false);
   const [showPro, setShowPro] = useState(false);
-  const [email, setEmail] = useState("");
-  const [emailDone, setEmailDone] = useState(false);
   const [pdfMsg, setPdfMsg] = useState("");
   const [isPro, setIsPro] = useState(false); // Always starts false — verified from Supabase via onAuthStateChange
   const [user, setUser] = useState(null);
@@ -1855,7 +2059,16 @@ export default function DealClarity() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session?.user) {
         setUser(session.user);
-        const { data: profile } = await supabase.from("profiles").select("is_pro, pro_type, trial_ends_at").eq("id", session.user.id).single();
+        const { data: profile, error: profileError } = await supabase.from("profiles").select("is_pro, pro_type, trial_ends_at").eq("id", session.user.id).single();
+        if (profileError) {
+          console.error("Profile query failed (likely RLS policy missing):", profileError.message, profileError);
+          // Fallback: if we previously cached Pro status, use it
+          const cachedPro = localStorage.getItem("dc_pro");
+          if (cachedPro === "true") {
+            setIsPro(true);
+            return; // Skip the rest, use cached status
+          }
+        }
         // Check trial expiry
         let proStatus = profile?.is_pro || false;
         if (profile?.pro_type === "trial" && profile?.trial_ends_at) {
@@ -1868,6 +2081,7 @@ export default function DealClarity() {
           }
         }
         setIsPro(proStatus);
+        try { localStorage.setItem("dc_pro", proStatus ? "true" : "false"); } catch {}
         if (proStatus && !syncedRef.current) {
           syncedRef.current = true;
           // Sync: merge any local deals to cloud, then load cloud portfolio
@@ -2364,6 +2578,7 @@ export default function DealClarity() {
         {page === "budget" && <BudgetPlanner isPro={isPro} setShowPro={setShowPro} />}
         {page === "agent" && <AgentHub t={t} isPro={isPro} setShowPro={setShowPro} user={user} />}
         {page === "pulse" && <PulseCheck isPro={isPro} setShowPro={setShowPro} />}
+        {page === "pnl" && <PLReader isPro={isPro} setShowPro={setShowPro} />}
         <footer className="text-center py-6 mt-8 border-t" style={{ borderColor: B.brd }}><p className="text-xs" style={{ color: B.mut }}>{t.footer}</p></footer>
       </main>
 
