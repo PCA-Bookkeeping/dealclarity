@@ -52,7 +52,7 @@ const KPI = ({ icon: I, label, value, sub, color, bg }) => (
   </div>
 );
 
-// ── Input must be defined OUTSIDE PulseCheck to avoid remount on every keystroke
+// ── Shared Input (module-level to avoid re-mount on state change)
 const PulseInput = ({ label, value, onChange, type = "text", pre, placeholder }) => (
   <div className="flex-1 min-w-0">
     <label className="block text-xs font-medium mb-1" style={{ color: B.mut }}>{label}</label>
@@ -152,6 +152,7 @@ export default function PulseCheck({ isPro, setShowPro }) {
       </div>
     );
   }
+
 
   return (
     <div className="space-y-4">

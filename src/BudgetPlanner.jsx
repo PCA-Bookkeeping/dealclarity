@@ -79,35 +79,13 @@ const KPI = ({ icon: I, label, value, sub, color, bg, trend }) => (
   </div>
 );
 
-// ═══════════════════════════════════════════════════════════════
-// TAB 1: BUDGET PLAN
-// ═══════════════════════════════════════════════════════════════
-function BudgetPlanTab({ data, setData, year, setYear }) {
-  const [editingId, setEditingId] = useState(null);
-  const [editName, setEditName] = useState("");
-  const [activeSection, setActiveSection] = useState({ income: true, expenses: true, savings: true });
+// ── Budget Section (module-level to avoid focus-loss on re-render)
+const sumRow = (amounts) => amounts.reduce((a, b) => a + (b || 0), 0);
 
-  const sumRow = (amounts) => amounts.reduce((a, b) => a + (b || 0), 0);
-  const sumCol = (rows, mo) => rows.reduce((a, r) => a + (r.amounts[mo] || 0), 0);
-  const totalIncome = MONTHS.map((_, i) => sumCol(data.income, i));
-  const totalExpenses = MONTHS.map((_, i) => sumCol(data.expenses, i));
-  const totalSavings = MONTHS.map((_, i) => sumCol(data.savings, i));
-  const toAllocate = MONTHS.map((_, i) => totalIncome[i] - totalExpenses[i] - totalSavings[i]);
-
-  const addRow = (section) => {
-    const newRow = { id: uid(), name: "New Category", amounts: Array(12).fill(0) };
-    setData(p => ({ ...p, [section]: [...p[section], newRow] }));
-  };
-  const removeRow = (section, id) => setData(p => ({ ...p, [section]: p[section].filter(r => r.id !== id) }));
-  const updateAmount = (section, id, mo, val) => {
-    setData(p => ({ ...p, [section]: p[section].map(r => r.id === id ? { ...r, amounts: r.amounts.map((a, i) => i === mo ? (parseFloat(val) || 0) : a) } : r) }));
-  };
-  const updateName = (section, id, name) => {
-    setData(p => ({ ...p, [section]: p[section].map(r => r.id === id ? { ...r, name } : r) }));
-    setEditingId(null);
-  };
-
-  const Section = ({ title, section, rows, totals, color, bgColor, icon: Icon }) => (
+function BudgetSection({ title, section, rows, totals, color, bgColor, icon: Icon,
+  editingId, editName, setEditingId, setEditName, activeSection, setActiveSection,
+  updateName, updateAmount, removeRow, addRow }) {
+  return (
     <div className="rounded-xl border overflow-hidden" style={{ borderColor: B.brd }}>
       <div className="flex items-center justify-between px-4 py-3 cursor-pointer select-none"
         style={{ background: bgColor }}
@@ -194,6 +172,36 @@ function BudgetPlanTab({ data, setData, year, setYear }) {
       )}
     </div>
   );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TAB 1: BUDGET PLAN
+// ═══════════════════════════════════════════════════════════════
+function BudgetPlanTab({ data, setData, year, setYear }) {
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [activeSection, setActiveSection] = useState({ income: true, expenses: true, savings: true });
+
+  const sumCol = (rows, mo) => rows.reduce((a, r) => a + (r.amounts[mo] || 0), 0);
+  const totalIncome = MONTHS.map((_, i) => sumCol(data.income, i));
+  const totalExpenses = MONTHS.map((_, i) => sumCol(data.expenses, i));
+  const totalSavings = MONTHS.map((_, i) => sumCol(data.savings, i));
+  const toAllocate = MONTHS.map((_, i) => totalIncome[i] - totalExpenses[i] - totalSavings[i]);
+
+  const addRow = (section) => {
+    const newRow = { id: uid(), name: "New Category", amounts: Array(12).fill(0) };
+    setData(p => ({ ...p, [section]: [...p[section], newRow] }));
+  };
+  const removeRow = (section, id) => setData(p => ({ ...p, [section]: p[section].filter(r => r.id !== id) }));
+  const updateAmount = (section, id, mo, val) => {
+    setData(p => ({ ...p, [section]: p[section].map(r => r.id === id ? { ...r, amounts: r.amounts.map((a, i) => i === mo ? (parseFloat(val) || 0) : a) } : r) }));
+  };
+  const updateName = (section, id, name) => {
+    setData(p => ({ ...p, [section]: p[section].map(r => r.id === id ? { ...r, name } : r) }));
+    setEditingId(null);
+  };
+
+  const sectionProps = { editingId, editName, setEditingId, setEditName, activeSection, setActiveSection, updateName, updateAmount, removeRow, addRow };
 
   return (
     <div className="space-y-4">
@@ -203,7 +211,7 @@ function BudgetPlanTab({ data, setData, year, setYear }) {
           <label className="text-xs font-medium" style={{ color: B.mut }}>Planning Year:</label>
           <select value={year} onChange={e => setYear(Number(e.target.value))}
             className="px-3 py-1.5 rounded-lg border text-sm font-semibold" style={{ borderColor: B.brd, color: B.pri }}>
-            {[2024,2025,2026,2027,2028,2029,2030].map(y => <option key={y}>{y}</option>)}
+            {[2024,2025,2026,2027,2028,2029,2030,2031,2032,2033,2034,2035,2036].map(y => <option key={y}>{y}</option>)}
           </select>
         </div>
         <div className="flex gap-3 text-xs">
@@ -247,9 +255,9 @@ function BudgetPlanTab({ data, setData, year, setYear }) {
         );
       })()}
 
-      <Section title="Income" section="income" rows={data.income} totals={totalIncome} color={B.grn} bgColor={B.grnL} icon={TrendingUp} />
-      <Section title="Expenses" section="expenses" rows={data.expenses} totals={totalExpenses} color={B.red} bgColor={B.redL} icon={DollarSign} />
-      <Section title="Savings & Investments" section="savings" rows={data.savings} totals={totalSavings} color={B.blue} bgColor={B.blueL} icon={PiggyBank} />
+      <BudgetSection title="Income" section="income" rows={data.income} totals={totalIncome} color={B.grn} bgColor={B.grnL} icon={TrendingUp} {...sectionProps} />
+      <BudgetSection title="Expenses" section="expenses" rows={data.expenses} totals={totalExpenses} color={B.red} bgColor={B.redL} icon={DollarSign} {...sectionProps} />
+      <BudgetSection title="Savings & Investments" section="savings" rows={data.savings} totals={totalSavings} color={B.blue} bgColor={B.blueL} icon={PiggyBank} {...sectionProps} />
     </div>
   );
 }
@@ -700,7 +708,7 @@ function DebtSnowballTab({ debts, setDebts }) {
             <label className="text-sm font-semibold" style={{ color: B.pri }}>Monthly Extra Payment</label>
             <span className="text-lg font-bold" style={{ color: B.blue }}>{fmt(extra)}</span>
           </div>
-          <input type="range" min="0" max="2000" step="25" value={extra} onChange={e => setExtra(Number(e.target.value))}
+          <input type="range" min="0" max="10000" step="50" value={extra} onChange={e => setExtra(Number(e.target.value))}
             className="w-full" style={{ accentColor: B.blue }} />
           <div className="flex justify-between text-xs mt-1" style={{ color: B.mut }}>
             <span>$0</span><span>$500</span><span>$1,000</span><span>$1,500</span><span>$2,000</span>
@@ -831,6 +839,17 @@ function DebtSnowballTab({ debts, setDebts }) {
 // ═══════════════════════════════════════════════════════════════
 // TAB 5: SAVINGS GOALS
 // ═══════════════════════════════════════════════════════════════
+// ── Savings Input (module-level to avoid focus-loss)
+const SavingsInput = ({ label, value, onChange, type = "text", pre }) => (
+  <div className="flex-1 min-w-0">
+    <label className="block text-xs font-medium mb-1" style={{ color: B.mut }}>{label}</label>
+    <div className="flex items-center rounded-lg border overflow-hidden" style={{ borderColor: B.brd }}>
+      {pre && <span className="px-2 text-xs font-medium" style={{ color: B.mut, background: "#F9FAFB" }}>{pre}</span>}
+      <input type={type} value={value} onChange={onChange} className="w-full px-2 py-1.5 text-sm outline-none" style={{ color: B.txt }} />
+    </div>
+  </div>
+);
+
 function SavingsGoalsTab({ funds, setFunds, savingsLog, setSavingsLog }) {
   const [showAddFund, setShowAddFund] = useState(false);
   const [newFund, setNewFund] = useState({ name: "", goal: 0, startAmount: 0, startDate: "", goalDate: "", monthly: 0 });
@@ -871,15 +890,6 @@ function SavingsGoalsTab({ funds, setFunds, savingsLog, setSavingsLog }) {
     return f.goal > 0 ? Math.min(100, (balance / f.goal) * 100) : 0;
   };
 
-  const Input = ({ label, value, onChange, type = "text", pre }) => (
-    <div className="flex-1 min-w-0">
-      <label className="block text-xs font-medium mb-1" style={{ color: B.mut }}>{label}</label>
-      <div className="flex items-center rounded-lg border overflow-hidden" style={{ borderColor: B.brd }}>
-        {pre && <span className="px-2 text-xs font-medium" style={{ color: B.mut, background: "#F9FAFB" }}>{pre}</span>}
-        <input type={type} value={value} onChange={onChange} className="w-full px-2 py-1.5 text-sm outline-none" style={{ color: B.txt }} />
-      </div>
-    </div>
-  );
 
   return (
     <div className="space-y-4">
@@ -905,14 +915,14 @@ function SavingsGoalsTab({ funds, setFunds, savingsLog, setSavingsLog }) {
         {showAddFund && (
           <div className="p-4 border-b space-y-3" style={{ borderColor: B.brd, background: "#FAFBFC" }}>
             <div className="flex flex-wrap gap-3">
-              <Input label="Fund Name" value={newFund.name} onChange={e => setNewFund(p => ({ ...p, name: e.target.value }))} />
-              <Input label="Goal Amount" value={newFund.goal || ""} onChange={e => setNewFund(p => ({ ...p, goal: e.target.value }))} type="number" pre="$" />
-              <Input label="Starting Amount" value={newFund.startAmount || ""} onChange={e => setNewFund(p => ({ ...p, startAmount: e.target.value }))} type="number" pre="$" />
+              <SavingsInput label="Fund Name" value={newFund.name} onChange={e => setNewFund(p => ({ ...p, name: e.target.value }))} />
+              <SavingsInput label="Goal Amount" value={newFund.goal || ""} onChange={e => setNewFund(p => ({ ...p, goal: e.target.value }))} type="number" pre="$" />
+              <SavingsInput label="Starting Amount" value={newFund.startAmount || ""} onChange={e => setNewFund(p => ({ ...p, startAmount: e.target.value }))} type="number" pre="$" />
             </div>
             <div className="flex flex-wrap gap-3">
-              <Input label="Start Date" value={newFund.startDate} onChange={e => setNewFund(p => ({ ...p, startDate: e.target.value }))} type="date" />
-              <Input label="Goal Date" value={newFund.goalDate} onChange={e => setNewFund(p => ({ ...p, goalDate: e.target.value }))} type="date" />
-              <Input label="Monthly Contribution" value={newFund.monthly || ""} onChange={e => setNewFund(p => ({ ...p, monthly: e.target.value }))} type="number" pre="$" />
+              <SavingsInput label="Start Date" value={newFund.startDate} onChange={e => setNewFund(p => ({ ...p, startDate: e.target.value }))} type="date" />
+              <SavingsInput label="Goal Date" value={newFund.goalDate} onChange={e => setNewFund(p => ({ ...p, goalDate: e.target.value }))} type="date" />
+              <SavingsInput label="Monthly Contribution" value={newFund.monthly || ""} onChange={e => setNewFund(p => ({ ...p, monthly: e.target.value }))} type="number" pre="$" />
             </div>
             <div className="flex gap-2">
               <button onClick={addFund} className="px-4 py-2 rounded-lg text-xs font-semibold" style={{ background: B.gold, color: B.pri }}>Save Fund</button>
@@ -977,8 +987,8 @@ function SavingsGoalsTab({ funds, setFunds, savingsLog, setSavingsLog }) {
           </div>
           <div className="p-4 space-y-3">
             <div className="flex flex-wrap gap-3 items-end">
-              <Input label="Date" value={logForm.date} onChange={e => setLogForm(p => ({ ...p, date: e.target.value }))} type="date" />
-              <Input label="Amount" value={logForm.amount || ""} onChange={e => setLogForm(p => ({ ...p, amount: e.target.value }))} type="number" pre="$" />
+              <SavingsInput label="Date" value={logForm.date} onChange={e => setLogForm(p => ({ ...p, date: e.target.value }))} type="date" />
+              <SavingsInput label="Amount" value={logForm.amount || ""} onChange={e => setLogForm(p => ({ ...p, amount: e.target.value }))} type="number" pre="$" />
               <div className="flex-1 min-w-0">
                 <label className="block text-xs font-medium mb-1" style={{ color: B.mut }}>Fund</label>
                 <select value={logForm.fundId} onChange={e => setLogForm(p => ({ ...p, fundId: e.target.value }))}
@@ -987,7 +997,7 @@ function SavingsGoalsTab({ funds, setFunds, savingsLog, setSavingsLog }) {
                   {funds.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
                 </select>
               </div>
-              <Input label="Details (optional)" value={logForm.details} onChange={e => setLogForm(p => ({ ...p, details: e.target.value }))} />
+              <SavingsInput label="Details (optional)" value={logForm.details} onChange={e => setLogForm(p => ({ ...p, details: e.target.value }))} />
               <button onClick={addLogEntry} className="px-4 py-1.5 rounded-lg text-xs font-semibold" style={{ background: B.gold, color: B.pri, marginBottom: 1 }}>
                 <Plus size={12} style={{ display: "inline", verticalAlign: -2 }} /> Log
               </button>

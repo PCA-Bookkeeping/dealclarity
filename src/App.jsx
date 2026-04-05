@@ -1826,12 +1826,12 @@ export default function DealClarity() {
   const [pdfMsg, setPdfMsg] = useState("");
   const [isPro, setIsPro] = useState(false); // Always starts false — verified from Supabase via onAuthStateChange
   const [user, setUser] = useState(null);
-const [showAuth, setShowAuth] = useState(false);
-const [authEmail, setAuthEmail] = useState("");
-const [authPassword, setAuthPassword] = useState("");
-const [authMode, setAuthMode] = useState("signin");
-const [authError, setAuthError] = useState("");
-const [authLoading, setAuthLoading] = useState(false);
+  const [showAuth, setShowAuth] = useState(false);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authMode, setAuthMode] = useState("signin");
+  const [authError, setAuthError] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
   const [toast, setToast] = useState(null); // { message, type }
   const showToast = useCallback((message, type = "error") => setToast({ message, type }), []);
   const [proCode, setProCode] = useState("");
@@ -1850,30 +1850,51 @@ const [authLoading, setAuthLoading] = useState(false);
   }, []);
 
   // ── Auth state listener: auto-detect login/logout, sync deals from cloud ──
+  const syncedRef = useRef(false); // prevent double cloud sync
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session?.user) {
         setUser(session.user);
         const { data: profile } = await supabase.from("profiles").select("is_pro, pro_type, trial_ends_at").eq("id", session.user.id).single();
-        if (profile?.is_pro) {
-          setIsPro(true);
+        // Check trial expiry
+        let proStatus = profile?.is_pro || false;
+        if (profile?.pro_type === "trial" && profile?.trial_ends_at) {
+          const expired = new Date(profile.trial_ends_at) < new Date();
+          if (expired) {
+            proStatus = false;
+            supabase.from("profiles").update({ is_pro: false, pro_type: null }).eq("id", session.user.id);
+          } else {
+            setTrialEndsAt(profile.trial_ends_at);
+          }
+        }
+        setIsPro(proStatus);
+        if (proStatus && !syncedRef.current) {
+          syncedRef.current = true;
           // Sync: merge any local deals to cloud, then load cloud portfolio
           setSyncing(true);
           try {
-            const localDeals = portfolio.length > 0 ? portfolio : [];
+            const localRaw = localStorage.getItem("dc_portfolio");
+            const localDeals = localRaw ? JSON.parse(localRaw) : [];
             const { deals, newUploads } = await mergeLocalToCloud(localDeals, session.user.id);
             setPortfolio(deals);
             if (newUploads > 0) showToast(`${newUploads} local deal${newUploads > 1 ? "s" : ""} synced to cloud!`, "success");
-            // Clear localStorage now that deals live in cloud
             try { localStorage.removeItem("dc_portfolio"); } catch {}
           } catch (err) {
             console.error("Cloud sync error:", err);
           }
           setSyncing(false);
+        } else if (!proStatus) {
+          // Free user — load local deals
+          try {
+            const localRaw = localStorage.getItem("dc_portfolio");
+            if (localRaw) setPortfolio(JSON.parse(localRaw));
+          } catch {}
         }
       } else if (event === "SIGNED_OUT") {
+        syncedRef.current = false;
         setUser(null);
         setIsPro(false);
+        setTrialEndsAt(null);
         setPortfolio([]);
         try { localStorage.removeItem("dc_portfolio"); localStorage.removeItem("dc_pro"); } catch {}
       }
@@ -1921,95 +1942,83 @@ const [authLoading, setAuthLoading] = useState(false);
   }, [isPro, showToast]);
 
   const activatePro = async (code) => {
-  if (!user) { setProMsg("Please sign in first to activate a code."); setTimeout(() => setProMsg(""), 3000); return; }
-  setProMsg("Validating...");
-  try {
-    const res = await fetch("/api/activate-pro", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code, email: user.email }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      setIsPro(true);
-      try { localStorage.setItem("dc_pro", "true"); } catch {}
-      setProMsg("Pro activated! Full access unlocked.");
-      trackEvent(EVENTS.PRO_ACTIVATED, { method: "code" });
-      setTimeout(() => { setProMsg(""); setShowPro(false); }, 2000);
-    } else {
-      setProMsg(data.error || "Invalid code. Please check and try again.");
+    if (!user) { setProMsg("Please sign in first to activate a code."); setTimeout(() => setProMsg(""), 3000); return; }
+    setProMsg("Validating...");
+    try {
+      const res = await fetch("/api/activate-pro", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, email: user.email }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setIsPro(true);
+        setProMsg("Pro activated! Full access unlocked.");
+        trackEvent(EVENTS.PRO_ACTIVATED, { method: "code" });
+        setTimeout(() => { setProMsg(""); setShowPro(false); }, 2000);
+      } else {
+        setProMsg(data.error || "Invalid code. Please check and try again.");
+        setTimeout(() => setProMsg(""), 3000);
+      }
+    } catch {
+      setProMsg("Connection error. Please try again.");
       setTimeout(() => setProMsg(""), 3000);
     }
-  } catch {
-    setProMsg("Connection error. Please try again.");
-    setTimeout(() => setProMsg(""), 3000);
-  }
-};
+  };
 
-const handleAuth = async () => {
-  setAuthError(""); setAuthLoading(true);
-  try {
-    if (authMode === "signup") {
-      const { data: signUpData, error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
-      if (error) throw error;
-      // Start 7-day trial on signup
-      if (signUpData?.user) {
-        const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-        await supabase.from("profiles").update({
-          trial_started: true,
-          trial_ends_at: trialEnd,
-          is_pro: true,
-          pro_type: "trial",
-        }).eq("id", signUpData.user.id);
-      }
-      setAuthError("Check your email to confirm your account. You'll get 7 days of Pro free!");
-      trackEvent(EVENTS.AUTH_SIGNUP);
-    } else {
-      const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
-      if (error) throw error;
-      trackEvent(EVENTS.AUTH_SIGNIN);
-      const { data: profile } = await supabase.from("profiles").select("is_pro, pro_type, trial_ends_at").eq("id", data.user.id).single();
-      setUser(data.user);
-      // Check trial expiry
-      if (profile?.pro_type === "trial" && profile?.trial_ends_at) {
-        const expired = new Date(profile.trial_ends_at) < new Date();
-        if (expired) {
-          setIsPro(false);
-          await supabase.from("profiles").update({ is_pro: false, pro_type: null }).eq("id", data.user.id);
-        } else {
-          setIsPro(true);
-          setTrialEndsAt(profile.trial_ends_at);
+  const handleAuth = async () => {
+    setAuthError(""); setAuthLoading(true);
+    try {
+      if (authMode === "signup") {
+        const { data: signUpData, error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
+        if (error) throw error;
+        // Start 7-day trial on signup — use upsert to avoid race with DB trigger
+        if (signUpData?.user) {
+          const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+          await supabase.from("profiles").upsert({
+            id: signUpData.user.id,
+            trial_started: true,
+            trial_ends_at: trialEnd,
+            is_pro: true,
+            pro_type: "trial",
+          });
         }
+        setAuthError("Check your email to confirm your account. You'll get 7 days of Pro free!");
+        trackEvent(EVENTS.AUTH_SIGNUP);
       } else {
-        setIsPro(profile?.is_pro || false);
+        const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
+        if (error) throw error;
+        trackEvent(EVENTS.AUTH_SIGNIN);
+        // onAuthStateChange handles setUser, setIsPro, sync — just close the modal
+        setShowAuth(false);
       }
-      setShowAuth(false);
+    } catch (e) { setAuthError(e.message); }
+    setAuthLoading(false);
+  };
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    // onAuthStateChange handles cleanup — but set state directly for immediate UI update
+    setUser(null); setIsPro(false); setPortfolio([]); setTrialEndsAt(null);
+    try { localStorage.removeItem("dc_portfolio"); localStorage.removeItem("dc_pro"); } catch {}
+  };
+
+  const handleManageSubscription = async () => {
+    if (!user) return;
+    try {
+      const { data: profile } = await supabase.from("profiles").select("stripe_customer_id").eq("id", user.id).single();
+      const res = await fetch("/api/customer-portal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customerId: profile?.stripe_customer_id, email: user.email }),
+      });
+      const data = await res.json();
+      if (data.url) window.location.href = data.url;
+      else showToast(data.error || "Could not open subscription management.", "error");
+    } catch {
+      showToast("Connection error. Please try again.", "error");
     }
-  } catch (e) { setAuthError(e.message); }
-  setAuthLoading(false);
-};
-
-const handleSignOut = async () => {
-  await supabase.auth.signOut();
-  setUser(null); setIsPro(false); setPortfolio([]); try { localStorage.removeItem("dc_portfolio"); localStorage.removeItem("dc_pro"); } catch {}
-};
-
-const handleManageSubscription = async () => {
-  if (!user) return;
-  try {
-    const { data: profile } = await supabase.from("profiles").select("stripe_customer_id").eq("id", user.id).single();
-    const res = await fetch("/api/customer-portal", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ customerId: profile?.stripe_customer_id, email: user.email }),
-    });
-    const data = await res.json();
-    if (data.url) window.location.href = data.url;
-    else showToast(data.error || "Could not open subscription management.", "error");
-  } catch {
-    showToast("Connection error. Please try again.", "error");
-  }
-};
+  };
 
   const cd = dealData[dealType];
   const uf = useCallback((k, v) => setDealData(p => {
