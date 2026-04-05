@@ -711,7 +711,7 @@ function DebtSnowballTab({ debts, setDebts }) {
           <input type="range" min="0" max="10000" step="50" value={extra} onChange={e => setExtra(Number(e.target.value))}
             className="w-full" style={{ accentColor: B.blue }} />
           <div className="flex justify-between text-xs mt-1" style={{ color: B.mut }}>
-            <span>$0</span><span>$500</span><span>$1,000</span><span>$1,500</span><span>$2,000</span>
+            <span>$0</span><span>$2k</span><span>$4k</span><span>$6k</span><span>$8k</span><span>$10k</span>
           </div>
         </div>
       </Card>
